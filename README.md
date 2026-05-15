@@ -191,3 +191,4 @@ az webapp deploy \
 Contact: sales@averiomdm.org | www.averiomdm.org
 
 © 2026 Averio Company. All rights reserved.
+"# AVMDM" 

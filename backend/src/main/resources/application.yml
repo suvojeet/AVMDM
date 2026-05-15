@@ -1,0 +1,156 @@
+spring:
+  application:
+    name: averio-mdm
+  profiles:
+    active: local
+
+  # Neo4j Graph Database
+  neo4j:
+    uri: ${NEO4J_URI:bolt://localhost:7687}
+    authentication:
+      username: ${NEO4J_USERNAME:neo4j}
+      password: ${NEO4J_PASSWORD:averio@MDM2026}
+
+  # Azure Cosmos DB
+  cloud:
+    azure:
+      cosmos:
+        endpoint: ${COSMOS_ENDPOINT:https://averio-mdmdb.documents.azure.com:443/}
+        key: ${COSMOS_KEY:}
+        database: ${COSMOS_DATABASE:averiodb}
+        populate-query-metrics: true
+
+  # Redis Cache
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: 6379
+      password: ${REDIS_PASSWORD:averio@Redis2026}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+
+  # Jackson
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    deserialization:
+      fail-on-unknown-properties: false
+
+  # Security
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AZURE_AD_JWK_URI:}
+
+  # GraphQL
+  graphql:
+    graphiql:
+      enabled: true
+    schema:
+      locations: classpath:graphql/**/
+
+# Server
+server:
+  port: 8080
+  compression:
+    enabled: true
+  forward-headers-strategy: framework
+
+# Management / Actuator
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: when-authorized
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+  health:
+    neo4j:
+      enabled: true
+    redis:
+      enabled: true
+
+# SpringDoc / Swagger
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operationsSorter: alpha
+    tagsSorter: alpha
+    display-request-duration: true
+  show-actuator: false
+
+# Averio Platform Config
+averio:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,https://mdm.averiomdm.org}
+
+  # Azure OpenAI Configuration (used when ai.agent.provider = AZURE_OPENAI)
+  ai:
+    enabled: ${AI_ENABLED:false}
+    endpoint: ${AZURE_OPENAI_ENDPOINT:}
+    api-key: ${AZURE_OPENAI_KEY:}
+    deployment-name: ${AZURE_OPENAI_DEPLOYMENT:gpt-4}
+    embedding-deployment: ${AZURE_OPENAI_EMBEDDING:text-embedding-ada-002}
+
+    # AI Agent Module — separate purchasable add-on
+    # Set AI_AGENT_ENABLED=false to fully disable all AI components in the UI
+    agent:
+      enabled: ${AI_AGENT_ENABLED:true}
+      # Provider: ANTHROPIC (default) | AZURE_OPENAI
+      provider: ${AI_AGENT_PROVIDER:ANTHROPIC}
+
+  # License Tier — controls which data-domain modules are accessible
+  # Values: STANDARD | ADVANCED | FULL   (default: FULL for development)
+  license:
+    tier: ${AVERIO_LICENSE_TIER:FULL}
+
+  # Claude AI (Anthropic) — AverioAI Chatbot & NLP search
+  # Used when ai.agent.provider = ANTHROPIC (default)
+  claude:
+    enabled: ${CLAUDE_ENABLED:true}
+    api-key: ${CLAUDE_API_KEY:sk-ant-api03-rJz...aQAA}
+    model: ${CLAUDE_MODEL:claude-sonnet-4-6}
+
+  # Azure Blob Storage (party photos)
+  storage:
+    connection-string: ${AZURE_STORAGE_CONNECTION_STRING:}
+    account-name: ${AZURE_STORAGE_ACCOUNT_NAME:averiomdmstorage}
+    container-name: ${AZURE_STORAGE_CONTAINER:party-photos}
+    max-photo-size-mb: 5
+
+  # Matching Configuration
+  matching:
+    auto-link-threshold: 0.95
+    review-threshold: 0.75
+    auto-reject-threshold: 0.40
+    batch-size: 1000
+    max-candidates: 200
+
+  # Survivorship
+  survivorship:
+    default-strategy: MOST_RECENT
+    refresh-on-update: true
+
+  # Timeline
+  timeline:
+    retention-days: 2555     # 7 years for GDPR
+    snapshot-enabled: true
+
+logging:
+  level:
+    com.averio.mdm: DEBUG
+    org.springframework.data.neo4j: INFO
+    org.neo4j.driver: WARN
+  pattern:
+    console: "%d{ISO8601} [%thread] %-5level [%X{correlationId}] %logger{36} - %msg%n"

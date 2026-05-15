@@ -1,0 +1,117 @@
+version: '3.9'
+
+services:
+  neo4j:
+    image: neo4j:5.18-enterprise
+    container_name: averio-neo4j
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    environment:
+      - NEO4J_AUTH=neo4j/averio@MDM2026
+      - NEO4J_ACCEPT_LICENSE_AGREEMENT=yes
+      - NEO4J_dbms_memory_heap_initial__size=2G
+      - NEO4J_dbms_memory_heap_max__size=4G
+      - NEO4J_dbms_memory_pagecache_size=2G
+      - NEO4J_PLUGINS=["apoc","graph-data-science"]
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - ./infrastructure/neo4j/init:/var/lib/neo4j/import
+    networks:
+      - averio-network
+    healthcheck:
+      test: ["CMD", "neo4j", "status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  cosmos-emulator:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: averio-cosmos
+    ports:
+      - "8081:8081"
+      - "10251:10251"
+      - "10252:10252"
+      - "10253:10253"
+      - "10254:10254"
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+    volumes:
+      - cosmos_data:/tmp/cosmos/appdata
+    networks:
+      - averio-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: averio-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --requirepass averio@Redis2026
+    volumes:
+      - redis_data:/data
+    networks:
+      - averio-network
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: averio-search
+    environment:
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=averio@ES2026
+      - xpack.security.enabled=true
+      - "ES_JAVA_OPTS=-Xms1g -Xmx1g"
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - averio-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: ../infrastructure/docker/Dockerfile.backend
+    container_name: averio-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - SPRING_PROFILES_ACTIVE=docker
+      - NEO4J_URI=bolt://neo4j:7687
+      - NEO4J_USERNAME=neo4j
+      - NEO4J_PASSWORD=averio@MDM2026
+      - COSMOS_ENDPOINT=https://cosmos-emulator:8081
+      - COSMOS_KEY=C2y6yDjf5/R+ob0N8A7Cgv30VRDJIWEHLM+4QDU5DE2nQ9nDuVTqobD4b8mGGyPMbIZnqyMsEcaGQy67XIw/Jw==
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=averio@Redis2026
+      - ELASTICSEARCH_URI=http://elasticsearch:9200
+    depends_on:
+      - neo4j
+      - redis
+      - elasticsearch
+    networks:
+      - averio-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: ../infrastructure/docker/Dockerfile.frontend
+    container_name: averio-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - averio-network
+
+volumes:
+  neo4j_data:
+  neo4j_logs:
+  cosmos_data:
+  redis_data:
+  es_data:
+
+networks:
+  averio-network:
+    driver: bridge

@@ -1,0 +1,110 @@
+/* ── Google Fonts — must precede @tailwind ─────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+  html { @apply scroll-smooth; }
+  body {
+    background-color: #070b18;
+    color: #e2e8f0;
+    font-family: "Inter", system-ui, sans-serif;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: #070b18; }
+  ::-webkit-scrollbar-thumb { background: #253060; border-radius: 99px; }
+  ::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+
+  /* Selection colour */
+  ::selection { background: rgba(37,99,235,0.35); color: #fff; }
+}
+
+@layer components {
+  /* ── Cards ─────────────────────────────────────────────────── */
+  .card {
+    background: #0d1225;
+    border: 1px solid #1a2444;
+    border-radius: 14px;
+    padding: 1.5rem;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+  .card-glass {
+    background: rgba(13,18,37,0.7);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid rgba(37,99,235,0.2);
+    border-radius: 14px;
+    padding: 1.5rem;
+  }
+  .stat-card {
+    @apply card flex flex-col gap-2 transition-all duration-200;
+    &:hover { border-color: rgba(37,99,235,0.4); box-shadow: 0 4px 24px rgba(37,99,235,0.1); }
+  }
+
+  /* ── Buttons ────────────────────────────────────────────────── */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
+           text-white transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+    box-shadow: 0 0 0 1px rgba(37,99,235,0.5), 0 4px 16px rgba(37,99,235,0.25);
+    &:hover:not(:disabled) {
+      box-shadow: 0 0 0 1px rgba(124,58,237,0.6), 0 6px 24px rgba(124,58,237,0.35);
+      transform: translateY(-1px);
+    }
+    &:active:not(:disabled) { transform: translateY(0); }
+  }
+  .btn-secondary {
+    @apply inline-flex items-center gap-2 px-4 py-2 rounded-lg font-medium text-sm
+           text-aq-text transition-all duration-200;
+    background: rgba(26,36,68,0.8);
+    border: 1px solid #253060;
+    &:hover { background: rgba(37,55,100,0.8); border-color: rgba(37,99,235,0.4); }
+  }
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 px-3 py-2 rounded-lg font-medium text-sm
+           text-aq-muted transition-all duration-150;
+    &:hover { background: rgba(37,99,235,0.1); color: #e2e8f0; }
+  }
+
+  /* ── Input ──────────────────────────────────────────────────── */
+  .input {
+    @apply w-full px-4 py-2.5 rounded-lg text-aq-text text-sm
+           placeholder-aq-dim focus:outline-none transition-all duration-200;
+    background: rgba(7,11,24,0.8);
+    border: 1px solid #1a2444;
+    &:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+  }
+
+  /* ── Badges ─────────────────────────────────────────────────── */
+  .badge { @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium; }
+  .badge-success { @apply badge bg-emerald-500/15 text-emerald-400 border border-emerald-500/25; }
+  .badge-warning { @apply badge bg-amber-500/15 text-amber-400 border border-amber-500/25; }
+  .badge-error   { @apply badge bg-red-500/15 text-red-400 border border-red-500/25; }
+  .badge-info    { @apply badge bg-blue-500/15 text-blue-400 border border-blue-500/25; }
+  .badge-purple  { @apply badge bg-purple-500/15 text-purple-400 border border-purple-500/25; }
+  .badge-neutral { @apply badge bg-slate-500/15 text-slate-400 border border-slate-500/25; }
+
+  /* ── Gradient Text ──────────────────────────────────────────── */
+  .gradient-text {
+    background: linear-gradient(135deg, #3b82f6 0%, #8b5cf6 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  /* ── Section Divider ────────────────────────────────────────── */
+  .aq-divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, #253060, transparent);
+  }
+
+  /* ── Glow effects ───────────────────────────────────────────── */
+  .glow-blue   { box-shadow: 0 0 20px rgba(37,99,235,0.4); }
+  .glow-purple { box-shadow: 0 0 20px rgba(124,58,237,0.4); }
+}

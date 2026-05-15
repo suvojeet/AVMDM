@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "environment": { "value": "prod" },
+    "location": { "value": "eastus2" },
+    "appName": { "value": "averio-mdm" },
+    "neo4jAuraUri": { "value": "neo4j+s://YOUR-NEO4J-AURA-URI.databases.neo4j.io" },
+    "neo4jPassword": { "value": "YOUR-NEO4J-PASSWORD" },
+    "azureOpenAiEndpoint": { "value": "https://YOUR-OPENAI.openai.azure.com/" }
+  }
+}

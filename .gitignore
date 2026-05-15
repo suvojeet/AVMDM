@@ -1,0 +1,31 @@
+# ── Secrets — never commit ────────────────────────────────────────────────
+backend/src/main/resources/application-local.yml
+backend/src/main/resources/application-*.yml
+!backend/src/main/resources/application.yml
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.jks
+
+# ── Build outputs ─────────────────────────────────────────────────────────
+target/
+*.class
+*.jar
+*.war
+
+# ── Frontend ──────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.*
+
+# ── IDE ───────────────────────────────────────────────────────────────────
+.idea/
+*.iml
+.vscode/settings.json
+.DS_Store
+
+# ── Docker ────────────────────────────────────────────────────────────────
+docker/data/

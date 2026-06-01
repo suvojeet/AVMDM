@@ -6,6 +6,7 @@ import com.azure.ai.openai.models.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -13,6 +14,7 @@ import java.util.*;
 @Slf4j
 @Service
 @RequiredArgsConstructor
+@ConditionalOnBean(com.azure.ai.openai.OpenAIClient.class)
 public class AIAssistantService {
 
     private final OpenAIClient openAIClient;

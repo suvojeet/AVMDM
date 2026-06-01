@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "averiocontainer", ru = "400")
+@Container(containerName = "timeline-events", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TimelineEvent {
 

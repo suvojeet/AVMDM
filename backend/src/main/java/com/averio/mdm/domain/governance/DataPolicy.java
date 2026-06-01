@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "data-policies", ru = "400")
+@Container(containerName = "data-policies", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class DataPolicy {
 

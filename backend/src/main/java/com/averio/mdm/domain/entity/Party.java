@@ -4,6 +4,8 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.springframework.data.annotation.Transient;
+import org.springframework.data.annotation.Version;
 import org.springframework.data.neo4j.core.schema.*;
 
 import java.time.LocalDate;
@@ -72,6 +74,9 @@ public class Party {
 
     @Property("countryOfResidence")
     private String countryOfResidence;
+
+    @Property("countryOfBirth")
+    private String countryOfBirth;
 
     @Property("language")
     private String language;
@@ -178,6 +183,7 @@ public class Party {
     @Property("updatedBy")
     private String updatedBy;
 
+    @Version
     @Property("version")
     private Long version;
 
@@ -199,9 +205,20 @@ public class Party {
     @Relationship(type = "HAS_ADDRESS", direction = Relationship.Direction.OUTGOING)
     private List<Address> addresses = new ArrayList<>();
 
+    @Relationship(type = "HAS_PHONE", direction = Relationship.Direction.OUTGOING)
+    private List<Phone> phoneNumbers = new ArrayList<>();
+
+    @Relationship(type = "HAS_EMAIL", direction = Relationship.Direction.OUTGOING)
+    private List<EmailAddress> emailAddresses = new ArrayList<>();
+
     @Relationship(type = "RELATED_TO", direction = Relationship.Direction.OUTGOING)
     private List<PartyRelationship> relationships = new ArrayList<>();
 
     @Relationship(type = "HAS_ACCOUNT", direction = Relationship.Direction.OUTGOING)
     private List<Account> accounts = new ArrayList<>();
+
+    // ---- Identifiers (not persisted in Neo4j graph — stored in Cosmos/document layer) ----
+    @Transient
+    @Builder.Default
+    private List<Map<String, String>> identifiers = new ArrayList<>();
 }

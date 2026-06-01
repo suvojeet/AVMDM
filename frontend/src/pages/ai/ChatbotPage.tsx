@@ -2,6 +2,9 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { chatbotApi } from "../../services/api";
+import { useLicense } from "../../context/LicenseContext";
+import { formatTime, formatDateTime } from "../../utils/dateUtils";
+import AiDisabledBanner from "../../components/common/AiDisabledBanner";
 import {
   Bot, Send, User, Sparkles, Loader2, RefreshCw,
   Search, Database, Clock, ClipboardList, BarChart3,
@@ -140,7 +143,7 @@ function GoldenRecordCard({ record }: { record: Record<string, unknown> }) {
   );
 }
 
-function TimelineCard({ events }: { events: Record<string, unknown>[] }) {
+function TimelineCard({ events }: { events: Record<string, any>[] }) {
   return (
     <div className="space-y-1.5">
       {events.map((ev, i) => (
@@ -152,7 +155,7 @@ function TimelineCard({ events }: { events: Record<string, unknown>[] }) {
             {ev.changedBy    && <span className="text-aq-dim ml-1.5">by {String(ev.changedBy)}</span>}
             {ev.eventTimestamp && (
               <span className="text-aq-dim ml-1.5">
-                · {new Date(String(ev.eventTimestamp)).toLocaleString()}
+                · {formatDateTime(ev.eventTimestamp as string)}
               </span>
             )}
           </div>
@@ -163,8 +166,8 @@ function TimelineCard({ events }: { events: Record<string, unknown>[] }) {
 }
 
 function StewardQueueCard({ tasks, summary }: {
-  tasks: Record<string, unknown>[];
-  summary?: Record<string, unknown>;
+  tasks: Record<string, any>[];
+  summary?: Record<string, any>;
 }) {
   if (summary) {
     return (
@@ -365,7 +368,7 @@ function AssistantMessage({ msg, navigate }: { msg: Message; navigate: (path: st
         )}
 
         <p className="text-[10px] text-slate-600 px-1 flex items-center gap-1.5">
-          {msg.timestamp.toLocaleTimeString()}
+          {formatTime(msg.timestamp)}
           {msg.model && msg.model !== "unconfigured" && (
             <span className="text-slate-700">· {msg.model}</span>
           )}
@@ -433,6 +436,8 @@ export default function ChatbotPage() {
     ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
   }, [input]);
 
+  const { hasAiAgent } = useLicense();
+
   const send = useCallback((text?: string) => {
     const msg = (text ?? input).trim();
     if (!msg || chatMutation.isPending) return;
@@ -446,6 +451,9 @@ export default function ChatbotPage() {
       .map((m) => ({ role: m.role, content: m.content }));
     chatMutation.mutate({ message: msg, history });
   }, [input, messages, chatMutation]);
+
+  // Guard — all hooks above, conditional return after
+  if (!hasAiAgent()) return <AiDisabledBanner feature="AverioAI Chatbot" />;
 
   const reset = () => {
     setMessages([{
@@ -494,7 +502,7 @@ export default function ChatbotPage() {
                   {msg.content}
                 </div>
                 <p className="text-[10px] text-slate-600 mt-1 text-right px-1">
-                  {msg.timestamp.toLocaleTimeString()}
+                  {formatTime(msg.timestamp)}
                 </p>
               </div>
             </div>

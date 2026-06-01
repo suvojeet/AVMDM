@@ -13,7 +13,7 @@ import java.util.List;
  * modelId convention: "model-PARTY", "model-ACCOUNT", etc. (one per entity type).
  */
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "ml-match-models", ru = "400")
+@Container(containerName = "ml-models", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MLMatchModel {
 
@@ -44,10 +44,18 @@ public class MLMatchModel {
     // ── Interpretability ────────────────────────────────────────────────────
     private List<FeatureImportance> featureImportances;
 
+    /**
+     * How this model was trained: ML_ONLY | AI_AUGMENTED.
+     * Null on models trained before this field was introduced.
+     */
+    private String        trainingMode;
+
     private String        modelVersion;
     private LocalDateTime trainedAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String        createdBy;
+    private String        updatedBy;
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class FeatureImportance {

@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export interface User {
   username: string;
-  role: "ADMIN" | "STEWARD" | "VIEWER";
+  role: "ADMIN" | "STEWARD" | "VIEWER" | "TESTER";
   displayName: string;
   email: string;
   avatarInitials: string;
@@ -37,6 +37,16 @@ const DEMO_USERS: Record<string, { password: string; user: User }> = {
       displayName: "Data Steward",
       email: "steward@averiomdm.org",
       avatarInitials: "DS",
+    },
+  },
+  tester: {
+    password: "tester123",
+    user: {
+      username: "tester",
+      role: "TESTER",
+      displayName: "QA Engineer",
+      email: "tester@averiomdm.org",
+      avatarInitials: "QA",
     },
   },
 };

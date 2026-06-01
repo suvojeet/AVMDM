@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.Map;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "system-logs", ru = "400")
+@Container(containerName = "system-logs", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SystemLog {
 

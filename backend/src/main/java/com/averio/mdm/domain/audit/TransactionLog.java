@@ -9,16 +9,16 @@ import org.springframework.data.annotation.Id;
 import java.time.LocalDateTime;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "transaction-logs", ru = "400")
+@Container(containerName = "transaction-logs", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class TransactionLog {
 
     @Id
     private String logId;
 
-    @PartitionKey
     private String entityType;          // PARTY, ACCOUNT, PRODUCT, AGREEMENT
 
+    @PartitionKey                       // maps to container partition key /entityId
     private String entityId;            // globalId of the affected entity
     private String operation;           // CREATE, UPDATE, DELETE, MERGE, UNMERGE, RESTORE
 

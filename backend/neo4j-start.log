@@ -1,0 +1,22 @@
+Directories in use:
+home:         C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0
+config:       C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\conf
+logs:         C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\logs
+plugins:      C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\plugins
+import:       C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\import
+data:         C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\data
+certificates: C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\certificates
+licenses:     C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\licenses
+run:          C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\run
+Starting Neo4j.
+2026-05-29 03:17:04.355+0000 INFO  Logging config in use: File 'C:\Users\Rakhi Chatterjee\neo4j\neo4j-community-5.18.0\conf\user-logs.xml'
+2026-05-29 03:17:04.369+0000 INFO  Starting...
+2026-05-29 03:17:06.179+0000 INFO  This instance is ServerId{59162c4f} (59162c4f-9056-4586-a4a4-5c3588505da5)
+2026-05-29 03:17:07.336+0000 INFO  ======== Neo4j 5.18.0 ========
+2026-05-29 03:17:09.405+0000 INFO  Bolt enabled on 0.0.0.0:7687.
+2026-05-29 03:17:10.316+0000 INFO  HTTP enabled on 0.0.0.0:7474.
+2026-05-29 03:17:10.317+0000 INFO  Remote interface available at http://localhost:7474/
+2026-05-29 03:17:10.320+0000 INFO  id: 21A88FA2ACFC7A19AAAC6437C96639A3A532E7A8A95A2F4B22F71A41F5249B1B
+2026-05-29 03:17:10.320+0000 INFO  name: system
+2026-05-29 03:17:10.320+0000 INFO  creationDate: 2026-05-27T21:52:01.921Z
+2026-05-29 03:17:10.320+0000 INFO  Started.

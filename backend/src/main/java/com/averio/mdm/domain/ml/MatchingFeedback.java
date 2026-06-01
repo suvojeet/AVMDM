@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
  * retraining can happen without re-fetching historical party records.
  */
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "matching-feedback", ru = "400")
+@Container(containerName = "matching-feedback", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MatchingFeedback {
 
@@ -52,4 +52,7 @@ public class MatchingFeedback {
 
     private LocalDateTime decidedAt;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
+    private String        createdBy;
+    private String        updatedBy;
 }

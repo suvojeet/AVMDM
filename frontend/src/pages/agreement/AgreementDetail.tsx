@@ -1,8 +1,9 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { FileText, ArrowLeft, Calendar, DollarSign, Scale, Users, Package, Building2, Clock } from "lucide-react";
+import { formatDate, formatDateTime } from "../../utils/dateUtils";
 import clsx from "clsx";
 
-const MOCK_AGREEMENTS: Record<string, Record<string, unknown>> = {
+const MOCK_AGREEMENTS: Record<string, Record<string, any>> = {
   "AGR-00301": {
     globalAgreementId: "AGR-00301", agreementNumber: "AGR-2021-0881",
     agreementType: "SERVICE_AGREEMENT", agreementSubType: "COMMERCIAL",
@@ -119,11 +120,11 @@ export default function AgreementDetail() {
         {/* Dates */}
         <Section title="Key Dates" icon={Calendar}>
           <div className="grid grid-cols-1 gap-y-4">
-            <Field label="Signed Date"     value={a.signedDate as string} />
-            <Field label="Effective Start" value={a.effectiveStartDate as string} />
-            <Field label="Effective End"   value={a.effectiveEndDate as string} />
-            <Field label="Renewal Date"    value={a.renewalDate as string} />
-            <Field label="Termination"     value={a.terminationDate as string} />
+            <Field label="Signed Date"     value={formatDate(a.signedDate as string)} />
+            <Field label="Effective Start" value={formatDate(a.effectiveStartDate as string)} />
+            <Field label="Effective End"   value={formatDate(a.effectiveEndDate as string)} />
+            <Field label="Renewal Date"    value={formatDate(a.renewalDate as string)} />
+            <Field label="Termination"     value={formatDate(a.terminationDate as string)} />
           </div>
         </Section>
 
@@ -202,8 +203,8 @@ export default function AgreementDetail() {
             <Field label="Source System"    value={a.sourceSystem as string} />
             <Field label="Source System ID" value={a.sourceSystemId as string} mono />
             <Field label="Golden Record ID" value={a.goldenRecordId as string} mono />
-            <Field label="Created"          value={a.createdAt as string} />
-            <Field label="Last Updated"     value={a.updatedAt as string} />
+            <Field label="Created"          value={formatDateTime(a.createdAt as string)} />
+            <Field label="Last Updated"     value={formatDateTime(a.updatedAt as string)} />
           </div>
         </Section>
       </div>

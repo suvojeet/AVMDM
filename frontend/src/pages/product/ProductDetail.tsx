@@ -2,7 +2,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { Package, ArrowLeft, Tag, Calendar, DollarSign, TrendingUp, Layers, Clock } from "lucide-react";
 import clsx from "clsx";
 
-const MOCK_PRODUCTS: Record<string, Record<string, unknown>> = {
+const MOCK_PRODUCTS: Record<string, Record<string, any>> = {
   "PRD-00201": {
     globalProductId: "PRD-00201", productCode: "CHK-BIZ-001",
     productName: "Chase Business Plus Checking", productType: "DEPOSIT", productSubType: "BUSINESS_CHECKING",

@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "enterprise-views", ru = "400")
+@Container(containerName = "enterprise-views", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class EnterpriseView {
 
@@ -32,7 +32,8 @@ public class EnterpriseView {
     private List<String> allowedRoles;   // optional RBAC list
     private List<String> allowedUsers;
 
-    private String createdBy;
+    private String        createdBy;
+    private String        updatedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

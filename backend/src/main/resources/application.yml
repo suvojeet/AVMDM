@@ -24,7 +24,7 @@ spring:
   data:
     redis:
       host: ${REDIS_HOST:localhost}
-      port: 6379
+      port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:averio@Redis2026}
       timeout: 2000ms
       lettuce:
@@ -32,8 +32,10 @@ spring:
           max-active: 20
           max-idle: 10
 
-  # Jackson
+  # Jackson — ISO 8601 dates platform-wide
   jackson:
+    date-format: "yyyy-MM-dd'T'HH:mm:ss"
+    time-zone: UTC
     serialization:
       write-dates-as-timestamps: false
     deserialization:
@@ -119,7 +121,7 @@ averio:
   # Used when ai.agent.provider = ANTHROPIC (default)
   claude:
     enabled: ${CLAUDE_ENABLED:true}
-    api-key: ${CLAUDE_API_KEY:sk-ant-api03-rJz...aQAA}
+    api-key: ${CLAUDE_API_KEY:}
     model: ${CLAUDE_MODEL:claude-sonnet-4-6}
 
   # Azure Blob Storage (party photos)
@@ -136,6 +138,23 @@ averio:
     auto-reject-threshold: 0.40
     batch-size: 1000
     max-candidates: 200
+
+    # Training mode — controls whether the ML model is trained on steward data only
+    # (ML_ONLY) or also augmented with GPT-4-generated labels (AI_AUGMENTED).
+    #
+    # mode options:
+    #   ML   — steward labels only (safe, fully explainable, no OpenAI API calls)
+    #   AI   — steward labels + GPT-4 synthetic labels (requires averio.ai.enabled=true)
+    #   AUTO — AI if Azure OpenAI is configured, otherwise falls back to ML (default)
+    #
+    # To switch to pure ML:   set TRAINING_MODE=ML
+    # To force AI:            set TRAINING_MODE=AI  (and ensure AI_ENABLED=true)
+    training:
+      mode: ${TRAINING_MODE:AUTO}
+      ai-label-sample-size: ${AI_LABEL_SAMPLE_SIZE:100}
+      ai-label-max-ratio: ${AI_LABEL_MAX_RATIO:0.40}
+      ai-match-threshold: ${AI_MATCH_THRESHOLD:0.70}
+      ai-no-match-threshold: ${AI_NO_MATCH_THRESHOLD:0.30}
 
   # Survivorship
   survivorship:

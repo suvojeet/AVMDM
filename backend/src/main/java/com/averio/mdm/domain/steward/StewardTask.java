@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "steward-tasks", ru = "400")
+@Container(containerName = "steward-tasks", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class StewardTask {
 
@@ -45,4 +45,6 @@ public class StewardTask {
     private String workflowInstanceId;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+    private String        createdBy;
+    private String        updatedBy;
 }

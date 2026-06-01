@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { formatDate } from "../../utils/dateUtils";
 import {
   ArrowLeft, Building2, CreditCard, Shield, Calendar, TrendingUp,
   AlertTriangle, CheckCircle2, Clock, User, GitFork, DollarSign,
@@ -334,8 +335,8 @@ function TabOverview({ acc }: { acc: Account }) {
           {[
             { label: "Account Status",  value: sCfg.label,  textColor: sCfg.textColor },
             { label: "Account Family",  value: acc.accountFamily.charAt(0) + acc.accountFamily.slice(1).toLowerCase() },
-            { label: "Opened",          value: acc.openDate },
-            { label: "Last Activity",   value: acc.lastActivityDate },
+            { label: "Opened",          value: formatDate(acc.openDate) },
+            { label: "Last Activity",   value: formatDate(acc.lastActivityDate) },
           ].map(({ label, value, textColor }) => (
             <div key={label}>
               <p className="text-[10px] text-aq-dim uppercase tracking-wider mb-0.5">{label}</p>

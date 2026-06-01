@@ -106,6 +106,12 @@ public class StewardService {
         return summary;
     }
 
+    public Map<String, Long> getMatchMethodDistribution() {
+        return StreamSupport.stream(taskRepository.findAll().spliterator(), false)
+                .filter(t -> t.getMatchMethod() != null)
+                .collect(Collectors.groupingBy(StewardTask::getMatchMethod, Collectors.counting()));
+    }
+
     private void executeResolution(StewardTask task, String resolution, String resolvedBy) {
         switch (resolution) {
             case "APPROVE_MERGE" -> {

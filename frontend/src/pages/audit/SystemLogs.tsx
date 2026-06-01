@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { auditApi } from "../../services/api";
+import { formatDateTimeSec } from "../../utils/dateUtils";
 import {
   ScrollText, AlertTriangle, AlertCircle, Info, RefreshCw,
   CheckCircle, Clock, User, Database, GitMerge, Pencil, Plus, Trash2,
@@ -46,15 +47,7 @@ const OP_ICON: Record<string, React.ElementType> = {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function fmtTs(ts: string | null | undefined) {
-  if (!ts) return "—";
-  try {
-    return new Date(ts).toLocaleString(undefined, {
-      year: "numeric", month: "short", day: "2-digit",
-      hour: "2-digit", minute: "2-digit", second: "2-digit",
-    });
-  } catch {
-    return ts;
-  }
+  return formatDateTimeSec(ts);
 }
 
 function Chip({ label, cls }: { label: string; cls: string }) {
@@ -67,7 +60,7 @@ function Chip({ label, cls }: { label: string; cls: string }) {
 
 // ── System log row ────────────────────────────────────────────────────────────
 
-function SystemLogRow({ log }: { log: Record<string, unknown> }) {
+function SystemLogRow({ log }: { log: Record<string, any> }) {
   const [expanded, setExpanded] = useState(false);
   const level   = String(log.level ?? "INFO");
   const Icon    = LEVEL_ICON[level] ?? Info;
@@ -110,7 +103,7 @@ function SystemLogRow({ log }: { log: Record<string, unknown> }) {
 
 // ── Transaction log row ───────────────────────────────────────────────────────
 
-function TxRow({ log }: { log: Record<string, unknown> }) {
+function TxRow({ log }: { log: Record<string, any> }) {
   const [expanded, setExpanded] = useState(false);
   const op       = String(log.operation ?? "");
   const status   = String(log.status ?? "SUCCESS");

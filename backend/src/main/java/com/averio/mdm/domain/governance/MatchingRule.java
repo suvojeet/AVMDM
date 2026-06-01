@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "matching-rules", ru = "400")
+@Container(containerName = "matching-rules", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class MatchingRule {
 
@@ -44,7 +44,8 @@ public class MatchingRule {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
-    private String createdBy;
+    private String        createdBy;
+    private String        updatedBy;
 
     @Data @Builder @NoArgsConstructor @AllArgsConstructor
     public static class MatchCondition {

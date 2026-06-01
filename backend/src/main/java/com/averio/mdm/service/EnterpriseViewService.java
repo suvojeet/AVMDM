@@ -22,9 +22,13 @@ public class EnterpriseViewService {
 
     @PostConstruct
     void seedEnterpriseViewIfAbsent() {
-        if (!viewRepository.findAll().iterator().hasNext()) {
-            log.info("Seeding default enterprise views");
-            viewRepository.saveAll(buildDefaultViews());
+        try {
+            if (!viewRepository.findAll().iterator().hasNext()) {
+                log.info("Seeding default enterprise views");
+                viewRepository.saveAll(buildDefaultViews());
+            }
+        } catch (Exception e) {
+            log.warn("Enterprise view seed skipped — will retry on next request: {}", e.getMessage());
         }
     }
 
@@ -42,14 +46,18 @@ public class EnterpriseViewService {
     }
 
     public EnterpriseView saveView(EnterpriseView view) {
-        if (view.getViewId() == null || view.getViewId().isBlank()) {
+        boolean isNew = view.getViewId() == null || view.getViewId().isBlank();
+        if (isNew) {
             view.setViewId(UUID.randomUUID().toString());
             view.setCreatedAt(LocalDateTime.now());
             view.setIsDefault(false);
         }
         view.setUpdatedAt(LocalDateTime.now());
-        if (view.getIsActive() == null) view.setIsActive(true);
+        if (view.getIsActive()          == null) view.setIsActive(true);
         if (view.getInheritGlobalRules() == null) view.setInheritGlobalRules(true);
+        if (view.getDepartment()         == null) view.setDepartment("CUSTOM");
+        if (view.getAllowedRoles()        == null) view.setAllowedRoles(new ArrayList<>());
+        if (view.getAllowedUsers()        == null) view.setAllowedUsers(new ArrayList<>());
         return viewRepository.save(view);
     }
 
@@ -109,53 +117,48 @@ public class EnterpriseViewService {
         LocalDateTime now = LocalDateTime.now();
         return List.of(
             EnterpriseView.builder()
-                .viewId("GLOBAL")
-                .department("ENTERPRISE")
+                .viewId("GLOBAL").department("ENTERPRISE")
                 .viewName("Enterprise View")
                 .description("Mandatory global view — all enterprise-wide survivorship, matching and data policies")
-                .colorHex("#6366f1")
-                .iconName("Globe")
+                .colorHex("#6366f1").iconName("Globe")
                 .isDefault(true).isActive(true).inheritGlobalRules(false)
+                .allowedRoles(new ArrayList<>()).allowedUsers(new ArrayList<>())
                 .createdAt(now).updatedAt(now).build(),
 
             EnterpriseView.builder()
-                .viewId("view-risk")
-                .department("RISK")
+                .viewId("view-risk").department("RISK")
                 .viewName("Risk View")
                 .description("Risk management golden view — stricter matching thresholds and regulatory policies")
-                .colorHex("#ef4444")
-                .iconName("ShieldAlert")
+                .colorHex("#ef4444").iconName("ShieldAlert")
                 .isDefault(false).isActive(true).inheritGlobalRules(true)
+                .allowedRoles(new ArrayList<>()).allowedUsers(new ArrayList<>())
                 .createdAt(now).updatedAt(now).build(),
 
             EnterpriseView.builder()
-                .viewId("view-finance")
-                .department("FINANCE")
+                .viewId("view-finance").department("FINANCE")
                 .viewName("Finance View")
                 .description("Finance department view — focus on legal entity resolution and financial identifiers")
-                .colorHex("#10b981")
-                .iconName("DollarSign")
+                .colorHex("#10b981").iconName("DollarSign")
                 .isDefault(false).isActive(true).inheritGlobalRules(true)
+                .allowedRoles(new ArrayList<>()).allowedUsers(new ArrayList<>())
                 .createdAt(now).updatedAt(now).build(),
 
             EnterpriseView.builder()
-                .viewId("view-compliance")
-                .department("COMPLIANCE")
+                .viewId("view-compliance").department("COMPLIANCE")
                 .viewName("Compliance View")
                 .description("Regulatory compliance view — GDPR, HIPAA, CCPA data policies")
-                .colorHex("#f59e0b")
-                .iconName("Scale")
+                .colorHex("#f59e0b").iconName("Scale")
                 .isDefault(false).isActive(true).inheritGlobalRules(true)
+                .allowedRoles(new ArrayList<>()).allowedUsers(new ArrayList<>())
                 .createdAt(now).updatedAt(now).build(),
 
             EnterpriseView.builder()
-                .viewId("view-operations")
-                .department("OPERATIONS")
+                .viewId("view-operations").department("OPERATIONS")
                 .viewName("Operations View")
                 .description("Operational data view — supply chain, vendor and partner master data")
-                .colorHex("#3b82f6")
-                .iconName("Settings2")
+                .colorHex("#3b82f6").iconName("Settings2")
                 .isDefault(false).isActive(true).inheritGlobalRules(true)
+                .allowedRoles(new ArrayList<>()).allowedUsers(new ArrayList<>())
                 .createdAt(now).updatedAt(now).build()
         );
     }

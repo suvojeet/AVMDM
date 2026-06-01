@@ -4,6 +4,9 @@ import { aiApi } from "../../services/api";
 import { Bot, Send, User, Sparkles, Loader2, RefreshCw } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import clsx from "clsx";
+import { useLicense } from "../../context/LicenseContext";
+import { formatTime } from "../../utils/dateUtils";
+import AiDisabledBanner from "../../components/common/AiDisabledBanner";
 
 interface Message { role: "user" | "assistant"; content: string; timestamp: Date; }
 
@@ -17,6 +20,7 @@ const SUGGESTIONS = [
 ];
 
 export default function AIAssistant() {
+  const { hasAiAgent } = useLicense();
   const [messages, setMessages] = useState<Message[]>([{
     role: "assistant",
     content: "Hello! I'm **AverioAI**, your intelligent MDM assistant. I can help you:\n\n- 🔍 Search and analyze master data\n- 📊 Explain data quality scores and golden records\n- ⚙️ Guide you through governance rules and policies\n- 🤝 Assist with entity resolution and steward decisions\n\nWhat would you like to know?",
@@ -47,6 +51,9 @@ export default function AIAssistant() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
+
+  // Guard — all hooks above, conditional return after
+  if (!hasAiAgent()) return <AiDisabledBanner feature="AI Assistant" />;
 
   const send = (text?: string) => {
     const msg = text ?? input.trim();
@@ -121,7 +128,7 @@ export default function AIAssistant() {
                 </ReactMarkdown>
               </div>
               <p className="text-xs text-slate-600 mt-1 px-1">
-                {msg.timestamp.toLocaleTimeString()}
+                {formatTime(msg.timestamp)}
               </p>
             </div>
           </div>

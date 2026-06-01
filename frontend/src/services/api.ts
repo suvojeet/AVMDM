@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "/api/v1",
+  baseURL: (import.meta.env.VITE_API_BASE_URL ?? "") + "/api/v1",
   headers: { "Content-Type": "application/json" },
   timeout: 30000,
 });
@@ -28,7 +28,8 @@ export const partyApi = {
   search: (q: string, page = 0, size = 20) =>
     api.get(`/parties/search`, { params: { q, page, size } }).then((r) => r.data),
   getById: (globalId: string) => api.get(`/parties/${globalId}`).then((r) => r.data),
-  getGoldenRecord: (globalId: string) => api.get(`/parties/${globalId}/golden-record`).then((r) => r.data),
+  getGoldenRecord: (globalId: string, viewId?: string) =>
+    api.get(`/parties/${globalId}/golden-record`, { params: viewId ? { viewId } : {} }).then((r) => r.data),
   getSources: (globalId: string) => api.get(`/parties/${globalId}/sources`).then((r) => r.data),
   getTimeline: (globalId: string) => api.get(`/parties/${globalId}/timeline`).then((r) => r.data),
   getSimilar: (globalId: string) => api.get(`/parties/${globalId}/similar`).then((r) => r.data),
@@ -39,6 +40,10 @@ export const partyApi = {
     api.post(`/parties/merge`, null, { params: { survivingGoldenId: survivingId, mergedGoldenId: mergedId, reason } }).then((r) => r.data),
   restore: (globalId: string, timestamp: string) =>
     api.post(`/parties/${globalId}/restore`, null, { params: { timestamp } }).then((r) => r.data),
+  generateGoldenId: (globalId: string, customGoldenId?: string) =>
+    api.post(`/parties/${globalId}/generate-golden-id`, null, {
+      params: customGoldenId ? { customGoldenId } : {},
+    }).then((r) => r.data),
   ingest: (party: Record<string, unknown>) => api.post(`/parties/ingest`, party).then((r) => r.data),
   getGoldenRecords: () => api.get(`/parties/golden`).then((r) => r.data),
   uploadPhoto: (globalId: string, file: File) => {
@@ -52,7 +57,19 @@ export const partyApi = {
     api.get(`/parties/${globalId}/photo`).then((r) => r.data as { photoUrl: string }),
   deletePhoto: (globalId: string) =>
     api.delete(`/parties/${globalId}/photo`).then((r) => r.data),
+  suggest: (q: string, limit = 10) =>
+    api.get(`/parties/suggest`, { params: { q, limit } }).then((r) => r.data as PartySuggestion[]),
 };
+
+export interface PartySuggestion {
+  globalId: string;
+  displayName: string;
+  partyType: string;
+  taxId?: string;
+  status?: string;
+  sourceSystem?: string;
+  addressSnippet?: string;
+}
 
 // ---- Dashboard API ----
 export const dashboardApi = {
@@ -97,6 +114,12 @@ export const stewardApi = {
     api.post(`/steward/tasks/${taskId}/resolve`, null, { params: { resolution, notes } }).then((r) => r.data),
   escalateTask: (taskId: string) => api.post(`/steward/tasks/${taskId}/escalate`).then((r) => r.data),
   getQueueSummary: () => api.get(`/steward/queue-summary`).then((r) => r.data),
+  forceMatchReview: (sourceId1: string, sourceId2: string, priority = "MEDIUM") =>
+    api.post(`/steward/force-match-review`, null, {
+      params: { sourceId1, sourceId2, priority },
+    }).then((r) => r.data),
+  seedDemoTasks: () => api.post(`/steward/demo/seed`).then((r) => r.data),
+  getMatchDetail: (taskId: string) => api.get(`/steward/tasks/${taskId}/match-detail`).then((r) => r.data),
 };
 
 // ---- AI API ----
@@ -190,12 +213,114 @@ export const auditApi = {
 // ---- Reference Data API ----
 export const referenceDataApi = {
   getAllGrouped:   () => api.get(`/reference-data`).then((r) => r.data),
+  getAllGroupedActive: () => api.get(`/reference-data/active`).then((r) => r.data),
   getCategories:  () => api.get(`/reference-data/categories`).then((r) => r.data),
   getByCategory:  (category: string) => api.get(`/reference-data/${category}`).then((r) => r.data),
+  getActiveByCategory: (category: string) => api.get(`/reference-data/${category}/active`).then((r) => r.data),
   resolveCode:    (category: string, code: number) =>
     api.get(`/reference-data/${category}/resolve/${code}`).then((r) => r.data),
-  save:   (item: unknown) => api.post(`/reference-data`, item).then((r) => r.data),
-  delete: (id: string)    => api.delete(`/reference-data/${id}`).then((r) => r.data),
+  save:       (item: unknown) => api.post(`/reference-data`, item).then((r) => r.data),
+  update:     (item: unknown) => api.post(`/reference-data`, item).then((r) => r.data),
+  delete:     (id: string)    => api.delete(`/reference-data/${id}`).then((r) => r.data),
+  reactivate: (id: string)    => api.post(`/reference-data/${id}/reactivate`).then((r) => r.data),
+};
+
+// ---- Address API ----
+export type PartyAddress = {
+  addressId?: string;
+  addressType?: string;
+  isPrimary?: boolean;
+  isVerified?: boolean;
+  line1?: string; line2?: string; line3?: string;
+  city?: string; stateProvince?: string; postalCode?: string;
+  county?: string; country?: string; countryCode?: string;
+  effectiveStartDate?: string; effectiveEndDate?: string;
+  endDate?: string; gdprPurgeDate?: string; endReason?: string;
+  createdAt?: string; updatedAt?: string; createdBy?: string; updatedBy?: string;
+};
+
+export const addressApi = {
+  list:        (globalId: string) =>
+    api.get(`/parties/${globalId}/addresses`).then((r) => r.data as PartyAddress[]),
+  add:         (globalId: string, addr: Partial<PartyAddress>) =>
+    api.post(`/parties/${globalId}/addresses`, addr).then((r) => r.data as PartyAddress),
+  update:      (globalId: string, addressId: string, addr: Partial<PartyAddress>) =>
+    api.put(`/parties/${globalId}/addresses/${addressId}`, addr).then((r) => r.data as PartyAddress),
+  softDelete:  (globalId: string, addressId: string, reason?: string) =>
+    api.delete(`/parties/${globalId}/addresses/${addressId}`, { params: reason ? { reason } : {} }).then((r) => r.data),
+  restore:     (globalId: string, addressId: string) =>
+    api.post(`/parties/${globalId}/addresses/${addressId}/restore`).then((r) => r.data),
+};
+
+// ---- Phone API ----
+export type PartyPhone = {
+  phoneId?: string;
+  phoneType?: string;
+  countryDialCode?: string;
+  areaCode?: string;
+  exchange?: string;
+  phoneNumber?: string;
+  extension?: string;
+  isPrimary?: boolean;
+  isVerified?: boolean;
+  startDate?: string;
+  endDate?: string;
+  endReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+};
+
+export const phoneApi = {
+  list:       (globalId: string) =>
+    api.get(`/parties/${globalId}/phones`).then((r) => r.data as PartyPhone[]),
+  add:        (globalId: string, phone: Partial<PartyPhone>) =>
+    api.post(`/parties/${globalId}/phones`, phone).then((r) => r.data as PartyPhone),
+  update:     (globalId: string, phoneId: string, phone: Partial<PartyPhone>) =>
+    api.put(`/parties/${globalId}/phones/${phoneId}`, phone).then((r) => r.data as PartyPhone),
+  softDelete: (globalId: string, phoneId: string, reason?: string) =>
+    api.delete(`/parties/${globalId}/phones/${phoneId}`, { params: reason ? { reason } : {} }).then((r) => r.data),
+  restore:    (globalId: string, phoneId: string) =>
+    api.post(`/parties/${globalId}/phones/${phoneId}/restore`).then((r) => r.data),
+};
+
+// ---- Email API ----
+export type PartyEmail = {
+  emailId?: string;
+  emailType?: string;
+  email?: string;
+  isPrimary?: boolean;
+  isVerified?: boolean;
+  startDate?: string;
+  endDate?: string;
+  endReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  createdBy?: string;
+  updatedBy?: string;
+};
+
+export const emailApi = {
+  list:       (globalId: string) =>
+    api.get(`/parties/${globalId}/emails`).then((r) => r.data as PartyEmail[]),
+  add:        (globalId: string, email: Partial<PartyEmail>) =>
+    api.post(`/parties/${globalId}/emails`, email).then((r) => r.data as PartyEmail),
+  update:     (globalId: string, emailId: string, email: Partial<PartyEmail>) =>
+    api.put(`/parties/${globalId}/emails/${emailId}`, email).then((r) => r.data as PartyEmail),
+  softDelete: (globalId: string, emailId: string, reason?: string) =>
+    api.delete(`/parties/${globalId}/emails/${emailId}`, { params: reason ? { reason } : {} }).then((r) => r.data),
+  restore:    (globalId: string, emailId: string) =>
+    api.post(`/parties/${globalId}/emails/${emailId}/restore`).then((r) => r.data),
+};
+
+// ---- Reference Category (Schema) API ----
+export const referenceCategoryApi = {
+  getAll:   ()                       => api.get(`/reference-data/schema`).then((r) => r.data),
+  getOne:   (key: string)            => api.get(`/reference-data/schema/${key}`).then((r) => r.data),
+  save:     (category: unknown)      => api.post(`/reference-data/schema`, category).then((r) => r.data),
+  update:   (key: string, cat: unknown) => api.put(`/reference-data/schema/${key}`, cat).then((r) => r.data),
+  delete:   (key: string)            => api.delete(`/reference-data/schema/${key}`).then((r) => r.data),
 };
 
 // ---- License API ----
@@ -208,6 +333,11 @@ export const chatbotApi = {
   chat: (message: string, history: Array<{ role: string; content: string }>) =>
     api.post(`/chatbot/chat`, { message, history }, { timeout: 60000 }).then((r) => r.data),
   suggestions: () => api.get(`/chatbot/suggestions`).then((r) => r.data),
+};
+
+// ---- Demo / Seed API ----
+export const demoApi = {
+  seedParties: () => api.post(`/demo/seed-parties`).then((r) => r.data),
 };
 
 export default api;

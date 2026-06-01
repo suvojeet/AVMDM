@@ -1,45 +1,57 @@
 interface AverioLogoProps {
-  size?: "sm" | "md" | "lg" | "xl";
+  size?: "sm" | "md" | "lg" | "xl" | "2xl";
   showText?: boolean;
   className?: string;
+  removeBackground?: boolean;
 }
 
 const HEIGHT: Record<string, number> = {
-  sm: 28,
-  md: 36,
-  lg: 56,
-  xl: 80,
+  sm:    28,
+  md:    36,
+  lg:    56,
+  xl:    80,
+  "2xl": 120,
 };
 
-const LOGO_SRC = "/averio-quantum.jpeg";
-
-export default function AverioLogo({ size = "md", showText = true, className = "" }: AverioLogoProps) {
+export default function AverioLogo({
+  size = "md",
+  showText = true,
+  className = "",
+}: AverioLogoProps) {
   const h = HEIGHT[size];
 
+  // Icon-only (square): contain the full PNG within the square; dark areas vanish via screen blend
   if (!showText) {
     return (
-      <div
-        className={`flex-shrink-0 overflow-hidden select-none rounded-lg ${className}`}
-        style={{ width: h, height: h }}
-      >
-        <img
-          src={LOGO_SRC}
-          alt="Averio"
-          draggable={false}
-          style={{ width: h, height: h, objectFit: "cover", display: "block" }}
-        />
-      </div>
+      <img
+        src="/averio-quantum.png"
+        alt="Averio Quantum"
+        className={className}
+        style={{
+          height: h,
+          width: h,
+          objectFit: "contain",
+          display: "block",
+          flexShrink: 0,
+          mixBlendMode: "screen",
+        }}
+      />
     );
   }
 
+  // Full logo (icon + AVERIO QUANTUM text)
   return (
-    <div className={`flex-shrink-0 select-none ${className}`}>
-      <img
-        src={LOGO_SRC}
-        alt="Averio Quantum"
-        draggable={false}
-        style={{ height: h, width: "auto", objectFit: "contain", display: "block" }}
-      />
-    </div>
+    <img
+      src="/averio-quantum.png"
+      alt="Averio Quantum"
+      className={className}
+      style={{
+        height: h,
+        width: "auto",
+        display: "block",
+        flexShrink: 0,
+        mixBlendMode: "screen",
+      }}
+    />
   );
 }

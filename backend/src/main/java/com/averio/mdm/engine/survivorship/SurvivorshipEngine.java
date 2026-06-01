@@ -1,5 +1,6 @@
 package com.averio.mdm.engine.survivorship;
 
+import com.averio.mdm.domain.entity.Address;
 import com.averio.mdm.domain.entity.Party;
 import com.averio.mdm.domain.golden.GoldenRecord;
 import com.averio.mdm.domain.governance.SurvivorshipRule;
@@ -50,6 +51,23 @@ public class SurvivorshipEngine {
             }
         }
 
+        // Also process any rule-defined attributes not in the default scalar list
+        // (e.g., identifiers.ssn, addresses.primary.city)
+        if (rules != null) {
+            rules.stream()
+                .filter(r -> Boolean.TRUE.equals(r.getIsActive()) && r.getAttributeName() != null)
+                .map(SurvivorshipRule::getAttributeName)
+                .filter(attr -> !PARTY_ATTRIBUTES.contains(attr))
+                .distinct()
+                .forEach(attribute -> {
+                    SurvivorshipRule rule = findRuleForAttribute(attribute, rules);
+                    GoldenRecord.GoldenAttribute golden = applyRule(attribute, sourceParties, rule);
+                    if (golden != null) {
+                        goldenAttributes.put(attribute, golden);
+                    }
+                });
+        }
+
         List<GoldenRecord.SourceRecord> sourceRecords = sourceParties.stream()
                 .map(p -> GoldenRecord.SourceRecord.builder()
                         .sourceSystem(p.getSourceSystem())
@@ -92,7 +110,7 @@ public class SurvivorshipEngine {
 
         switch (ruleType) {
             case "SOURCE_PRIORITY" -> {
-                var winner = sourcePriorityStrategy.select(candidates, rule.getSourceSystemPriority());
+                var winner = sourcePriorityStrategy.select(candidates, rule.getSourceSystemPriority(), rule.getSourcePriorities());
                 winningValue = winner.getValue();
                 winningSource = winner.getSourceSystem();
             }
@@ -168,6 +186,12 @@ public class SurvivorshipEngine {
     }
 
     private Object getAttributeValue(Party party, String attribute) {
+        if (attribute.startsWith("identifiers.")) {
+            return getIdentifierValue(party, attribute.substring("identifiers.".length()));
+        }
+        if (attribute.startsWith("addresses.")) {
+            return getAddressValue(party, attribute.substring("addresses.".length()));
+        }
         try {
             Field field = Party.class.getDeclaredField(attribute);
             field.setAccessible(true);
@@ -175,6 +199,65 @@ public class SurvivorshipEngine {
         } catch (Exception e) {
             return null;
         }
+    }
+
+    private Object getIdentifierValue(Party party, String subField) {
+        return switch (subField.toLowerCase()) {
+            case "ssn"            -> party.getSsn();
+            case "passport"       -> party.getPassport();
+            case "driverslicense" -> party.getDriversLicense();
+            case "nationalid"     -> party.getNationalId();
+            default -> {
+                if (party.getIdentifiers() == null) yield null;
+                yield party.getIdentifiers().stream()
+                    .filter(id -> subField.equalsIgnoreCase(id.get("type")))
+                    .map(id -> id.get("value"))
+                    .findFirst().orElse(null);
+            }
+        };
+    }
+
+    private Object getAddressValue(Party party, String subPath) {
+        List<Address> addresses = party.getAddresses();
+        if (addresses == null || addresses.isEmpty()) return null;
+        Address address;
+        String fieldName;
+
+        if (subPath.startsWith("primary.")) {
+            address = resolvePrimaryAddress(addresses);
+            fieldName = subPath.substring("primary.".length());
+        } else if (subPath.equals("primary")) {
+            address = resolvePrimaryAddress(addresses);
+            return address == null ? null : formatAddress(address);
+        } else {
+            address = addresses.stream().filter(a -> a.getEndDate() == null).findFirst().orElse(null);
+            fieldName = subPath;
+        }
+
+        if (address == null) return null;
+        try {
+            Field field = Address.class.getDeclaredField(fieldName);
+            field.setAccessible(true);
+            return field.get(address);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private Address resolvePrimaryAddress(List<Address> addresses) {
+        return addresses.stream()
+            .filter(a -> a.getEndDate() == null)
+            .filter(a -> Boolean.TRUE.equals(a.getIsPrimary()) || "PRIMARY".equalsIgnoreCase(a.getAddressType()))
+            .findFirst()
+            .orElseGet(() -> addresses.stream().filter(a -> a.getEndDate() == null).findFirst().orElse(null));
+    }
+
+    private String formatAddress(Address addr) {
+        return java.util.stream.Stream.of(
+                addr.getLine1(), addr.getCity(), addr.getStateProvince(),
+                addr.getPostalCode(), addr.getCountry())
+            .filter(s -> s != null && !s.isBlank())
+            .collect(Collectors.joining(", "));
     }
 
     private SurvivorshipRule findRuleForAttribute(String attribute, List<SurvivorshipRule> rules) {

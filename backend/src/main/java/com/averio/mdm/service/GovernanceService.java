@@ -27,17 +27,21 @@ public class GovernanceService {
 
     @PostConstruct
     void seedDefaultsIfEmpty() {
-        if (!survivorshipRuleRepository.findAll().iterator().hasNext()) {
-            log.info("Seeding default survivorship rules into Cosmos DB");
-            survivorshipRuleRepository.saveAll(buildDefaultSurvivorshipRules());
-        }
-        if (!matchingRuleRepository.findAll().iterator().hasNext()) {
-            log.info("Seeding default matching rules into Cosmos DB");
-            matchingRuleRepository.saveAll(buildDefaultMatchingRules());
-        }
-        if (!dataPolicyRepository.findAll().iterator().hasNext()) {
-            log.info("Seeding default data policies into Cosmos DB");
-            dataPolicyRepository.saveAll(buildDefaultDataPolicies());
+        try {
+            if (!survivorshipRuleRepository.findAll().iterator().hasNext()) {
+                log.info("Seeding default survivorship rules into Cosmos DB");
+                survivorshipRuleRepository.saveAll(buildDefaultSurvivorshipRules());
+            }
+            if (!matchingRuleRepository.findAll().iterator().hasNext()) {
+                log.info("Seeding default matching rules into Cosmos DB");
+                matchingRuleRepository.saveAll(buildDefaultMatchingRules());
+            }
+            if (!dataPolicyRepository.findAll().iterator().hasNext()) {
+                log.info("Seeding default data policies into Cosmos DB");
+                dataPolicyRepository.saveAll(buildDefaultDataPolicies());
+            }
+        } catch (Exception e) {
+            log.warn("Governance seed skipped — will retry on next request: {}", e.getMessage());
         }
     }
 

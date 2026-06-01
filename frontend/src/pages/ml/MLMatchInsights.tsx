@@ -1,8 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Brain, RefreshCw, TrendingUp, AlertCircle, CheckCircle, Eye, Zap } from "lucide-react";
+import { formatDate } from "../../utils/dateUtils";
 import clsx from "clsx";
 import { mlApi } from "../../services/api";
+import { useLicense } from "../../context/LicenseContext";
+import AiDisabledBanner from "../../components/common/AiDisabledBanner";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -123,6 +126,7 @@ function StatCard({ label, value, sub, color }: {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function MLMatchInsights() {
+  const { hasAiAgent } = useLicense();
   const [entityType, setEntityType] = useState("PARTY");
   const qc = useQueryClient();
 
@@ -151,6 +155,8 @@ export default function MLMatchInsights() {
   const model = modelQ.data;
   const feedback = feedbackQ.data;
   const suggestions = suggestionsQ.data ?? [];
+
+  if (!hasAiAgent()) return <AiDisabledBanner feature="ML Match Insights" />;
 
   return (
     <div className="flex flex-col h-full bg-aq-dark overflow-hidden">
@@ -210,7 +216,7 @@ export default function MLMatchInsights() {
                 <StatCard label="Training Examples"  value={model.trainingExamples!}
                           sub={`${model.positiveExamples} match · ${model.negativeExamples} no-match`} />
                 <StatCard label="Model Version"      value={model.modelVersion ?? "—"}
-                          sub={model.trainedAt ? new Date(model.trainedAt).toLocaleDateString() : undefined} />
+                          sub={model.trainedAt ? formatDate(model.trainedAt as string) : undefined} />
               </div>
             ) : (
               <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-4 flex items-start gap-3">

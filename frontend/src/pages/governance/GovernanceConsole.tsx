@@ -1,14 +1,16 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, Link } from "react-router-dom";
-import { governanceApi } from "../../services/api";
+import { governanceApi, enterpriseViewApi } from "../../services/api";
 import {
   Shield, Plus, CheckCircle, AlertTriangle, Edit2,
-  ToggleLeft, ToggleRight, X, Trash2, GripVertical, ArrowLeft,
+  ToggleLeft, ToggleRight, X, Trash2, ArrowLeft,
+  ChevronDown, ShieldCheck, MapPin, Tag,
 } from "lucide-react";
 import clsx from "clsx";
 
 type Tab = "survivorship" | "matching" | "policies";
+type DrawerState = { tab: Tab; editing?: Record<string, any> } | null;
 
 // ── Shared form primitives ────────────────────────────────────────────────────
 
@@ -53,6 +55,104 @@ function SlideOver({ open, onClose, title, children }: {
   );
 }
 
+// ── Grouped attribute picker ──────────────────────────────────────────────────
+
+function GroupedAttributePicker({ value, onChange, error }: {
+  value: string; onChange: (v: string) => void; error?: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handle(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  const lower = search.toLowerCase();
+  const filtered = ATTRIBUTE_GROUPS
+    .map((g) => ({ ...g, attrs: g.attrs.filter((a) => a.label.toLowerCase().includes(lower) || a.value.toLowerCase().includes(lower)) }))
+    .filter((g) => g.attrs.length > 0);
+
+  function groupIcon(icon: string) {
+    if (icon === "shield") return <ShieldCheck size={11} className="text-blue-400 flex-shrink-0" />;
+    if (icon === "map")    return <MapPin size={11} className="text-emerald-400 flex-shrink-0" />;
+    return <Tag size={11} className="text-aq-dim flex-shrink-0" />;
+  }
+
+  function groupOf(val: string) {
+    return ATTRIBUTE_GROUPS.find((g) => g.attrs.some((a) => a.value === val));
+  }
+
+  const group = groupOf(value);
+
+  return (
+    <div ref={ref} className="relative">
+      <div className={clsx(
+        "flex items-center gap-1.5 w-full bg-aq-dark border rounded-lg px-3 py-2 text-sm cursor-text",
+        "focus-within:border-aq-blue/60 transition-colors",
+        error ? "border-red-500/60" : "border-aq-border"
+      )}>
+        {group && (
+          <span className={clsx(
+            "flex items-center gap-1 text-[9px] font-semibold px-1.5 py-0.5 rounded-full border flex-shrink-0",
+            group.icon === "shield" ? "bg-blue-500/15 text-blue-300 border-blue-500/25" :
+            group.icon === "map"    ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/25" :
+                                      "bg-aq-border/40 text-aq-dim border-aq-border"
+          )}>
+            {groupIcon(group.icon)}
+            {group.group.replace(" Fields", "").replace(" Attributes", "")}
+          </span>
+        )}
+        <input
+          className="flex-1 bg-transparent outline-none text-aq-text placeholder-aq-dim/50 min-w-0"
+          placeholder="e.g. firstName or identifiers.ssn"
+          value={value}
+          onChange={(e) => { onChange(e.target.value); setSearch(e.target.value); setOpen(true); }}
+          onFocus={() => { setSearch(""); setOpen(true); }}
+        />
+        <button type="button" onClick={() => setOpen((o) => !o)} className="text-aq-dim hover:text-aq-text transition-colors flex-shrink-0">
+          <ChevronDown size={14} className={clsx("transition-transform", open && "rotate-180")} />
+        </button>
+      </div>
+
+      {open && (
+        <div className="absolute z-50 mt-1 w-full bg-aq-card border border-aq-border rounded-xl shadow-2xl max-h-72 overflow-y-auto">
+          {filtered.length === 0 ? (
+            <p className="text-xs text-aq-dim/60 text-center py-4">No matching attributes</p>
+          ) : (
+            filtered.map((g) => (
+              <div key={g.group}>
+                <div className="flex items-center gap-1.5 px-3 pt-3 pb-1.5">
+                  {groupIcon(g.icon)}
+                  <span className="text-[10px] font-bold text-aq-dim uppercase tracking-widest">{g.group}</span>
+                </div>
+                {g.attrs.map((a) => (
+                  <button
+                    key={a.value}
+                    type="button"
+                    onMouseDown={(e) => { e.preventDefault(); onChange(a.value); setOpen(false); setSearch(""); }}
+                    className={clsx(
+                      "w-full flex items-center justify-between px-4 py-2 text-xs text-left transition-colors",
+                      value === a.value ? "bg-aq-blue/15 text-aq-blue-2" : "text-aq-text hover:bg-aq-border/40"
+                    )}
+                  >
+                    <span className="font-medium">{a.label}</span>
+                    <code className="text-[10px] text-aq-dim/60 font-mono">{a.value}</code>
+                  </button>
+                ))}
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Survivorship Rule Form ────────────────────────────────────────────────────
 
 const RULE_TYPES = [
@@ -65,35 +165,112 @@ const RULE_TYPES = [
   { value: "VALUE_PREFERENCE", label: "Value Preference", desc: "Rank specific attribute values — highest rank wins" },
 ];
 
-const COMMON_ATTRIBUTES = [
-  "fullName","firstName","lastName","organizationName","legalName",
-  "dateOfBirth","gender","nationality","taxId","ein","dunsNumber",
-  "lei","email","phone","address","sourceSystem",
+const ATTRIBUTE_GROUPS: { group: string; icon: "tag" | "shield" | "map"; attrs: { value: string; label: string }[] }[] = [
+  {
+    group: "Scalar Attributes", icon: "tag",
+    attrs: [
+      { value: "firstName",        label: "First Name" },
+      { value: "lastName",         label: "Last Name" },
+      { value: "middleName",       label: "Middle Name" },
+      { value: "fullName",         label: "Full Name" },
+      { value: "organizationName", label: "Organization Name" },
+      { value: "legalName",        label: "Legal Name" },
+      { value: "dateOfBirth",      label: "Date of Birth" },
+      { value: "gender",           label: "Gender" },
+      { value: "nationality",      label: "Nationality" },
+      { value: "taxId",            label: "Tax ID" },
+      { value: "ein",              label: "EIN" },
+      { value: "dunsNumber",       label: "DUNS Number" },
+      { value: "lei",              label: "LEI" },
+      { value: "ssn",              label: "SSN (dedicated field)" },
+      { value: "status",           label: "Status" },
+      { value: "sourceSystem",     label: "Source System" },
+    ],
+  },
+  {
+    group: "Identifier Fields", icon: "shield",
+    attrs: [
+      { value: "identifiers.ssn",            label: "SSN" },
+      { value: "identifiers.passport",       label: "Passport" },
+      { value: "identifiers.driversLicense", label: "Driver's License" },
+      { value: "identifiers.nationalId",     label: "National ID" },
+    ],
+  },
+  {
+    group: "Address Fields", icon: "map",
+    attrs: [
+      { value: "addresses.primary",               label: "Primary Address (full)" },
+      { value: "addresses.primary.line1",         label: "Address Line 1" },
+      { value: "addresses.primary.city",          label: "City" },
+      { value: "addresses.primary.stateProvince", label: "State / Province" },
+      { value: "addresses.primary.postalCode",    label: "Postal Code" },
+      { value: "addresses.primary.country",       label: "Country" },
+      { value: "addresses.primary.countryCode",   label: "Country Code" },
+    ],
+  },
 ];
 
-const SOURCE_SYSTEMS = ["CRM","ERP","HCM","BILLING","PORTAL","LEGACY","MANUAL","OTHER"];
+const ALL_ATTRIBUTE_VALUES = ATTRIBUTE_GROUPS.flatMap((g) => g.attrs.map((a) => a.value));
+
+const SOURCE_SYSTEMS = ["CRM","ERP","HCM","HRM","BILLING","BANKING","TRUST","BROKERAGE","PORTAL","LEGACY","MANUAL","OTHER"];
 
 type ValuePreferenceEntry = { attributeName: string; value: string; rank: string };
+type SourcePriorityEntry  = { source: string; priority: number };
+
+// ── View selector ────────────────────────────────────────────────────────────
+
+function ViewSelector({ views, value, onChange }: {
+  views: Record<string, any>[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
+        Configure for Golden View <span className="text-red-400">*</span>
+      </label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="w-full bg-aq-dark border border-aq-border rounded-lg px-3 py-2 text-sm text-aq-text
+                   focus:outline-none focus:border-aq-blue/60 transition-colors"
+      >
+        <option value="GLOBAL">Enterprise View (Global)</option>
+        {views.filter((v) => !Boolean(v.isDefault)).map((v) => (
+          <option key={String(v.viewId)} value={String(v.viewId)}>
+            {String(v.viewName ?? v.viewId)}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
 
 type SurvivorshipForm = {
+  viewId: string;
   ruleName: string; description: string; entityType: string;
   attributeName: string; ruleType: string; priority: string;
   isActive: boolean; isSupremacy: boolean;
+  sourcePriorities: SourcePriorityEntry[];
   sourceSystemPriority: string[];
   supremacySourceSystem: string;
   valuePreferences: ValuePreferenceEntry[];
 };
 
-function SurvivorshipRuleForm({ initial, onSave, onClose }: {
+function SurvivorshipRuleForm({ initial, onSave, onClose, views, defaultViewId }: {
   initial?: Partial<SurvivorshipForm>;
   onSave: (data: Record<string, unknown>) => void;
   onClose: () => void;
+  views: Record<string, any>[];
+  defaultViewId: string;
 }) {
   const [f, setF] = useState<SurvivorshipForm>({
+    viewId: defaultViewId,
     ruleName: "", description: "", entityType: "PARTY",
     attributeName: "", ruleType: "SOURCE_PRIORITY", priority: "10",
     isActive: true, isSupremacy: false,
-    sourceSystemPriority: ["CRM", "ERP"],
+    sourcePriorities: [{ source: "CRM", priority: 1 }, { source: "ERP", priority: 2 }],
+    sourceSystemPriority: [],
     supremacySourceSystem: "",
     valuePreferences: [{ attributeName: "", value: "", rank: "1" }],
     ...initial,
@@ -105,14 +282,19 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
     setErrors((e) => { const n = { ...e }; delete n[k]; return n; });
   };
 
-  function addSource() { set("sourceSystemPriority", [...f.sourceSystemPriority, ""]); }
-  function removeSource(i: number) {
-    set("sourceSystemPriority", f.sourceSystemPriority.filter((_, idx) => idx !== i));
+  function addSource() {
+    const maxP = f.sourcePriorities.length > 0 ? Math.max(...f.sourcePriorities.map(s => s.priority)) : 0;
+    set("sourcePriorities", [...f.sourcePriorities, { source: "", priority: maxP + 1 }]);
   }
-  function updateSource(i: number, v: string) {
-    const arr = [...f.sourceSystemPriority];
-    arr[i] = v;
-    set("sourceSystemPriority", arr);
+  function removeSource(i: number) {
+    set("sourcePriorities", f.sourcePriorities.filter((_, idx) => idx !== i));
+  }
+  function updateSourceField(i: number, field: "source" | "priority", v: string) {
+    const arr = f.sourcePriorities.map((e, idx) => idx === i
+      ? { ...e, [field]: field === "priority" ? (parseInt(v) || 1) : v }
+      : e
+    );
+    set("sourcePriorities", arr);
   }
 
   function addValuePref() {
@@ -152,6 +334,7 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
     e.preventDefault();
     if (!validate()) return;
     onSave({
+      viewId:                f.viewId === "GLOBAL" ? null : f.viewId,
       ruleName:              f.ruleName.trim(),
       description:           f.description.trim() || undefined,
       entityType:            f.entityType,
@@ -160,7 +343,12 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
       priority:              parseInt(f.priority) || 10,
       isActive:              f.isActive,
       isSupremacy:           f.ruleType === "SUPREMACY",
-      sourceSystemPriority:  f.ruleType === "SOURCE_PRIORITY" ? f.sourceSystemPriority.filter(Boolean) : undefined,
+      sourcePriorities:      f.ruleType === "SOURCE_PRIORITY"
+        ? f.sourcePriorities.filter(e => e.source)
+        : undefined,
+      sourceSystemPriority:  f.ruleType === "SOURCE_PRIORITY"
+        ? [...f.sourcePriorities].sort((a, b) => a.priority - b.priority).map(e => e.source).filter(Boolean)
+        : undefined,
       supremacySourceSystem: f.ruleType === "SUPREMACY" ? f.supremacySourceSystem.trim() : undefined,
       valuePreferences:      f.ruleType === "VALUE_PREFERENCE"
         ? f.valuePreferences
@@ -176,6 +364,7 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
 
   return (
     <form onSubmit={handleSubmit} className="p-5 space-y-5">
+      <ViewSelector views={views} value={f.viewId} onChange={(v) => set("viewId", v)} />
       {/* Basic info */}
       <div className="space-y-4">
         <Field label="Rule Name" required>
@@ -207,65 +396,65 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
         </div>
 
         <Field label="Attribute Name" required>
-          <div className="flex gap-2">
-            <input list="attr-suggestions" className={clsx(inputCls, errors.attributeName && "border-red-500/60")}
-              placeholder="e.g. organizationName"
-              value={f.attributeName} onChange={(e) => set("attributeName", e.target.value)} />
-            <datalist id="attr-suggestions">
-              {COMMON_ATTRIBUTES.map((a) => <option key={a} value={a} />)}
-            </datalist>
-          </div>
+          <GroupedAttributePicker
+            value={f.attributeName}
+            onChange={(v) => set("attributeName", v)}
+            error={!!errors.attributeName}
+          />
           {errors.attributeName && <p className="text-xs text-red-400 mt-1">{errors.attributeName}</p>}
         </Field>
       </div>
 
       {/* Rule type */}
-      <div className="space-y-2">
-        <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
-          Rule Type <span className="text-red-400">*</span>
-        </label>
-        <div className="space-y-2">
+      <Field label="Rule Type" required>
+        <select
+          className={clsx(selectCls, errors.ruleType && "border-red-500/60")}
+          value={f.ruleType}
+          onChange={(e) => set("ruleType", e.target.value)}
+        >
           {RULE_TYPES.map((rt) => (
-            <button key={rt.value} type="button"
-              onClick={() => set("ruleType", rt.value)}
-              className={clsx(
-                "w-full flex items-start gap-3 px-3 py-2.5 rounded-lg border text-left transition-all",
-                f.ruleType === rt.value
-                  ? "bg-aq-blue/15 border-aq-blue/40"
-                  : "bg-aq-dark border-aq-border hover:border-aq-border/80"
-              )}>
-              <div className={clsx("w-3.5 h-3.5 rounded-full border-2 mt-0.5 flex-shrink-0 transition-colors",
-                f.ruleType === rt.value ? "border-aq-blue-2 bg-aq-blue-2" : "border-aq-border bg-transparent"
-              )} />
-              <div>
-                <p className={clsx("text-sm font-medium", f.ruleType === rt.value ? "text-aq-blue-2" : "text-aq-text")}>
-                  {rt.label}
-                </p>
-                <p className="text-xs text-aq-dim">{rt.desc}</p>
-              </div>
-            </button>
+            <option key={rt.value} value={rt.value}>{rt.label}</option>
           ))}
-        </div>
-      </div>
+        </select>
+        {RULE_TYPES.find((rt) => rt.value === f.ruleType)?.desc && (
+          <p className="text-[11px] text-aq-dim/70 mt-1">
+            {RULE_TYPES.find((rt) => rt.value === f.ruleType)!.desc}
+          </p>
+        )}
+      </Field>
 
-      {/* SOURCE_PRIORITY — ordered source list */}
+      {/* SOURCE_PRIORITY — numeric priority grid */}
       {f.ruleType === "SOURCE_PRIORITY" && (
         <div className="space-y-2">
-          <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
-            Source Priority Order
-          </label>
+          <div>
+            <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
+              Source Priority
+            </label>
+            <p className="text-[11px] text-aq-dim/70 mt-0.5">
+              Lower number = higher priority. Same number = most recently updated wins.
+            </p>
+          </div>
+          <div className="grid grid-cols-[3.5rem_1fr_2rem] gap-2 px-0.5 mb-1">
+            <span className="text-[10px] font-semibold text-aq-dim uppercase tracking-wide">Priority</span>
+            <span className="text-[10px] font-semibold text-aq-dim uppercase tracking-wide">Source System</span>
+            <span />
+          </div>
           <div className="space-y-2">
-            {f.sourceSystemPriority.map((src, i) => (
-              <div key={i} className="flex items-center gap-2">
-                <GripVertical size={14} className="text-aq-dim flex-shrink-0" />
-                <span className="text-xs text-aq-dim w-5 text-right flex-shrink-0">{i + 1}.</span>
-                <select value={src} onChange={(e) => updateSource(i, e.target.value)}
-                  className={clsx(selectCls, "flex-1")}>
+            {f.sourcePriorities.map((entry, i) => (
+              <div key={i} className="grid grid-cols-[3.5rem_1fr_2rem] gap-2 items-center">
+                <input
+                  type="number" min={1} max={999}
+                  className={clsx(inputCls, "text-center px-1")}
+                  value={entry.priority}
+                  onChange={(e) => updateSourceField(i, "priority", e.target.value)}
+                />
+                <select value={entry.source} onChange={(e) => updateSourceField(i, "source", e.target.value)}
+                  className={selectCls}>
                   <option value="">— Select source —</option>
                   {SOURCE_SYSTEMS.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
                 <button type="button" onClick={() => removeSource(i)}
-                  className="text-aq-dim hover:text-red-400 transition-colors flex-shrink-0">
+                  className="text-aq-dim hover:text-red-400 transition-colors">
                   <Trash2 size={13} />
                 </button>
               </div>
@@ -327,7 +516,7 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
                   onChange={(e) => updateValuePref(i, "attributeName", e.target.value)}
                 />
                 <datalist id="attr-suggestions-vp">
-                  {COMMON_ATTRIBUTES.map((a) => <option key={a} value={a} />)}
+                  {ALL_ATTRIBUTE_VALUES.map((a) => <option key={a} value={a} />)}
                 </datalist>
 
                 {/* Value */}
@@ -401,21 +590,27 @@ function SurvivorshipRuleForm({ initial, onSave, onClose }: {
 // ── Matching Rule Form ────────────────────────────────────────────────────────
 
 type MatchingForm = {
+  viewId: string;
   ruleName: string; description: string; entityType: string;
   matchType: string; autoLinkThreshold: string;
   reviewThreshold: string; autoRejectThreshold: string;
   useAIEnhancement: boolean; isActive: boolean; priority: string;
 };
 
-function MatchingRuleForm({ onSave, onClose }: {
+function MatchingRuleForm({ initial, onSave, onClose, views, defaultViewId }: {
+  initial?: Partial<MatchingForm>;
   onSave: (data: Record<string, unknown>) => void;
   onClose: () => void;
+  views: Record<string, any>[];
+  defaultViewId: string;
 }) {
   const [f, setF] = useState<MatchingForm>({
+    viewId: defaultViewId,
     ruleName: "", description: "", entityType: "PARTY",
     matchType: "PROBABILISTIC",
     autoLinkThreshold: "0.95", reviewThreshold: "0.75", autoRejectThreshold: "0.40",
     useAIEnhancement: false, isActive: true, priority: "10",
+    ...initial,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -435,6 +630,7 @@ function MatchingRuleForm({ onSave, onClose }: {
     e.preventDefault();
     if (!validate()) return;
     onSave({
+      viewId:               f.viewId === "GLOBAL" ? null : f.viewId,
       ruleName:             f.ruleName.trim(),
       description:          f.description.trim() || undefined,
       entityType:           f.entityType,
@@ -450,6 +646,7 @@ function MatchingRuleForm({ onSave, onClose }: {
 
   return (
     <form onSubmit={handleSubmit} className="p-5 space-y-5">
+      <ViewSelector views={views} value={f.viewId} onChange={(v) => set("viewId", v)} />
       <Field label="Rule Name" required>
         <input className={clsx(inputCls, errors.ruleName && "border-red-500/60")}
           placeholder="e.g. Party Probabilistic Match"
@@ -544,19 +741,25 @@ function MatchingRuleForm({ onSave, onClose }: {
 // ── Policy Form ───────────────────────────────────────────────────────────────
 
 type PolicyForm = {
+  viewId: string;
   policyName: string; description: string; policyType: string;
   entityType: string; severity: string; action: string;
   complianceFramework: string; isActive: boolean;
 };
 
-function PolicyForm({ onSave, onClose }: {
+function PolicyForm({ initial, onSave, onClose, views, defaultViewId }: {
+  initial?: Partial<PolicyForm>;
   onSave: (data: Record<string, unknown>) => void;
   onClose: () => void;
+  views: Record<string, any>[];
+  defaultViewId: string;
 }) {
   const [f, setF] = useState<PolicyForm>({
+    viewId: defaultViewId,
     policyName: "", description: "", policyType: "QUALITY",
     entityType: "", severity: "MEDIUM", action: "WARN",
     complianceFramework: "", isActive: true,
+    ...initial,
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -576,6 +779,7 @@ function PolicyForm({ onSave, onClose }: {
     e.preventDefault();
     if (!validate()) return;
     onSave({
+      viewId:              f.viewId === "GLOBAL" ? null : f.viewId,
       policyName:          f.policyName.trim(),
       description:         f.description.trim() || undefined,
       policyType:          f.policyType,
@@ -589,6 +793,7 @@ function PolicyForm({ onSave, onClose }: {
 
   return (
     <form onSubmit={handleSubmit} className="p-5 space-y-5">
+      <ViewSelector views={views} value={f.viewId} onChange={(v) => set("viewId", v)} />
       <Field label="Policy Name" required>
         <input className={clsx(inputCls, errors.policyName && "border-red-500/60")}
           placeholder="e.g. GDPR Data Retention Policy"
@@ -668,6 +873,73 @@ function PolicyForm({ onSave, onClose }: {
   );
 }
 
+// ── Helpers: map API data → form state for editing ───────────────────────────
+
+function ruleToSurvivorshipForm(r: Record<string, any>): Partial<SurvivorshipForm> {
+  let sourcePriorities: SourcePriorityEntry[];
+  if (Array.isArray(r.sourcePriorities) && r.sourcePriorities.length > 0) {
+    sourcePriorities = (r.sourcePriorities as Array<Record<string, any>>).map((e) => ({
+      source:   String(e.source ?? ""),
+      priority: Number(e.priority ?? 1),
+    }));
+  } else if (Array.isArray(r.sourceSystemPriority) && r.sourceSystemPriority.length > 0) {
+    sourcePriorities = (r.sourceSystemPriority as string[]).map((s, i) => ({ source: s, priority: i + 1 }));
+  } else {
+    sourcePriorities = [{ source: "CRM", priority: 1 }, { source: "ERP", priority: 2 }];
+  }
+  return {
+    viewId:                r.viewId ? String(r.viewId) : "GLOBAL",
+    ruleName:              String(r.ruleName ?? ""),
+    description:           String(r.description ?? ""),
+    entityType:            String(r.entityType ?? "PARTY"),
+    attributeName:         String(r.attributeName ?? ""),
+    ruleType:              String(r.ruleType ?? "SOURCE_PRIORITY"),
+    priority:              String(r.priority ?? "10"),
+    isActive:              Boolean(r.isActive ?? true),
+    isSupremacy:           Boolean(r.isSupremacy ?? false),
+    sourcePriorities,
+    sourceSystemPriority:  Array.isArray(r.sourceSystemPriority) ? (r.sourceSystemPriority as string[]) : [],
+    supremacySourceSystem: String(r.supremacySourceSystem ?? ""),
+    valuePreferences:      Array.isArray(r.valuePreferences)
+      ? (r.valuePreferences as Array<Record<string, any>>).map((vp) => ({
+          attributeName: String(vp.attributeName ?? ""),
+          value:         String(vp.value ?? ""),
+          rank:          String(vp.rank ?? "1"),
+        }))
+      : [{ attributeName: "", value: "", rank: "1" }],
+  };
+}
+
+function ruleToMatchingForm(r: Record<string, any>): Partial<MatchingForm> {
+  return {
+    viewId:              r.viewId ? String(r.viewId) : "GLOBAL",
+    ruleName:            String(r.ruleName ?? ""),
+    description:         String(r.description ?? ""),
+    entityType:          String(r.entityType ?? "PARTY"),
+    matchType:           String(r.matchType ?? "PROBABILISTIC"),
+    autoLinkThreshold:   String(r.autoLinkThreshold ?? "0.95"),
+    reviewThreshold:     String(r.reviewThreshold ?? "0.75"),
+    autoRejectThreshold: String(r.autoRejectThreshold ?? "0.40"),
+    useAIEnhancement:    Boolean(r.useAIEnhancement ?? false),
+    isActive:            Boolean(r.isActive ?? true),
+    priority:            String(r.priority ?? "10"),
+  };
+}
+
+function policyToForm(p: Record<string, any>): Partial<PolicyForm> {
+  return {
+    viewId:              p.viewId ? String(p.viewId) : "GLOBAL",
+    policyName:          String(p.policyName ?? ""),
+    description:         String(p.description ?? ""),
+    policyType:          String(p.policyType ?? "QUALITY"),
+    entityType:          String(p.entityType ?? ""),
+    severity:            String(p.severity ?? "MEDIUM"),
+    action:              String(p.action ?? "WARN"),
+    complianceFramework: String(p.complianceFramework ?? ""),
+    isActive:            Boolean(p.isActive ?? true),
+  };
+}
+
 // ── Main Console ──────────────────────────────────────────────────────────────
 
 const ruleTypeColor: Record<string, string> = {
@@ -689,11 +961,17 @@ const severityColor: Record<string, string> = {
 
 export default function GovernanceConsole() {
   const [tab, setTab]       = useState<Tab>("survivorship");
-  const [drawer, setDrawer] = useState<Tab | null>(null);
+  const [drawer, setDrawer] = useState<DrawerState>(null);
   const qc = useQueryClient();
   const [searchParams] = useSearchParams();
   const viewId = searchParams.get("viewId") ?? undefined;
   const isGlobalView = !viewId || viewId === "GLOBAL";
+  const defaultViewId = viewId ?? "GLOBAL";
+
+  const { data: enterpriseViews = [] } = useQuery<Record<string, any>[]>({
+    queryKey: ["enterprise-views"],
+    queryFn: enterpriseViewApi.getAll,
+  });
 
   const { data: survivorshipRules = [] } = useQuery({
     queryKey: ["survivorship-rules", viewId],
@@ -747,9 +1025,9 @@ export default function GovernanceConsole() {
     <div className="space-y-6 animate-fade-in">
       {/* Back link when scoped to a department view */}
       {!isGlobalView && (
-        <Link to="/enterprise-views"
+        <Link to="/parties/golden-records"
           className="inline-flex items-center gap-1.5 text-xs text-aq-dim hover:text-aq-text transition-colors">
-          <ArrowLeft size={13} /> Back to Enterprise Views
+          <ArrowLeft size={13} /> Back to Golden View
         </Link>
       )}
 
@@ -774,11 +1052,11 @@ export default function GovernanceConsole() {
             <Link to="/governance"
               className="px-3 py-2 rounded-lg text-xs font-medium text-aq-dim border border-aq-border
                          hover:bg-aq-border/40 hover:text-aq-text transition-colors">
-              View Enterprise Rules
+              All Enterprise Rules
             </Link>
           )}
           <button
-            onClick={() => setDrawer(tab)}
+            onClick={() => setDrawer({ tab })}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold
                        bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30
                        hover:bg-aq-blue/30 transition-colors"
@@ -824,13 +1102,13 @@ export default function GovernanceConsole() {
       {/* ── Survivorship Rules ── */}
       {tab === "survivorship" && (
         <div className="space-y-3">
-          {(survivorshipRules as Record<string, unknown>[]).length === 0 ? (
+          {(survivorshipRules as Record<string, any>[]).length === 0 ? (
             <EmptyState
               label="No survivorship rules yet"
               sub={'Click "New Rule" to define how golden record attributes are resolved.'}
-              onNew={() => setDrawer("survivorship")}
+              onNew={() => setDrawer({ tab: "survivorship" })}
             />
-          ) : (survivorshipRules as Record<string, unknown>[]).map((rule, i) => (
+          ) : (survivorshipRules as Record<string, any>[]).map((rule, i) => (
             <div key={String(rule.ruleId ?? i)}
               className="bg-aq-card border border-aq-border rounded-xl p-4 hover:border-aq-border/80 transition-colors">
               <div className="flex items-start justify-between gap-4">
@@ -852,7 +1130,20 @@ export default function GovernanceConsole() {
                   {rule.description && (
                     <p className="text-xs text-aq-dim mb-2">{String(rule.description)}</p>
                   )}
-                  {Array.isArray(rule.sourceSystemPriority) && rule.sourceSystemPriority.length > 0 && (
+                  {Array.isArray(rule.sourcePriorities) && rule.sourcePriorities.length > 0 ? (
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-aq-dim">Priority:</span>
+                      {([...(rule.sourcePriorities as Array<{ source: string; priority: number }>)]
+                        .sort((a, b) => a.priority - b.priority)
+                        .map((e, j) => (
+                          <span key={j} className="flex items-center gap-1 text-xs bg-aq-dark text-aq-text px-2 py-0.5 rounded border border-aq-border">
+                            <span className="text-aq-blue-2 font-bold">{e.priority}</span>
+                            <span className="text-aq-dim/50">—</span>
+                            {e.source}
+                          </span>
+                        )))}
+                    </div>
+                  ) : Array.isArray(rule.sourceSystemPriority) && rule.sourceSystemPriority.length > 0 && (
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs text-aq-dim">Priority:</span>
                       {(rule.sourceSystemPriority as string[]).map((s, j) => (
@@ -871,7 +1162,7 @@ export default function GovernanceConsole() {
                     <div className="mt-2 space-y-1">
                       <p className="text-[10px] font-semibold text-aq-dim uppercase tracking-wide">Value Preferences</p>
                       <div className="flex flex-wrap gap-1.5">
-                        {(rule.valuePreferences as Array<Record<string, unknown>>).map((vp, j) => (
+                        {(rule.valuePreferences as Array<Record<string, any>>).map((vp, j) => (
                           <div key={j}
                             className="flex items-center gap-1.5 text-xs bg-aq-dark border border-aq-border
                                        rounded-lg px-2 py-1">
@@ -895,7 +1186,11 @@ export default function GovernanceConsole() {
                   {rule.isActive
                     ? <ToggleRight size={20} className="text-emerald-400" />
                     : <ToggleLeft  size={20} className="text-aq-dim" />}
-                  <button className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors">
+                  <button
+                    onClick={() => setDrawer({ tab: "survivorship", editing: rule })}
+                    className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors"
+                    title="Edit rule"
+                  >
                     <Edit2 size={14} />
                   </button>
                 </div>
@@ -908,13 +1203,13 @@ export default function GovernanceConsole() {
       {/* ── Matching Rules ── */}
       {tab === "matching" && (
         <div className="space-y-3">
-          {(matchingRules as Record<string, unknown>[]).length === 0 ? (
+          {(matchingRules as Record<string, any>[]).length === 0 ? (
             <EmptyState
               label="No matching rules yet"
               sub={'Click "New Rule" to configure how parties are matched.'}
-              onNew={() => setDrawer("matching")}
+              onNew={() => setDrawer({ tab: "matching" })}
             />
-          ) : (matchingRules as Record<string, unknown>[]).map((rule, i) => (
+          ) : (matchingRules as Record<string, any>[]).map((rule, i) => (
             <div key={String(rule.ruleId ?? i)} className="bg-aq-card border border-aq-border rounded-xl p-4">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
@@ -944,7 +1239,11 @@ export default function GovernanceConsole() {
                     ))}
                   </div>
                 </div>
-                <button className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors flex-shrink-0">
+                <button
+                  onClick={() => setDrawer({ tab: "matching", editing: rule })}
+                  className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors flex-shrink-0"
+                  title="Edit rule"
+                >
                   <Edit2 size={14} />
                 </button>
               </div>
@@ -956,13 +1255,13 @@ export default function GovernanceConsole() {
       {/* ── Policies ── */}
       {tab === "policies" && (
         <div className="space-y-3">
-          {(policies as Record<string, unknown>[]).length === 0 ? (
+          {(policies as Record<string, any>[]).length === 0 ? (
             <EmptyState
               label="No data policies yet"
               sub={'Click "New Policy" to add quality, privacy or retention policies.'}
-              onNew={() => setDrawer("policies")}
+              onNew={() => setDrawer({ tab: "policies" })}
             />
-          ) : (policies as Record<string, unknown>[]).map((policy, i) => (
+          ) : (policies as Record<string, any>[]).map((policy, i) => (
             <div key={String(policy.policyId ?? i)} className="bg-aq-card border border-aq-border rounded-xl p-4">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
@@ -994,7 +1293,11 @@ export default function GovernanceConsole() {
                   {policy.isActive
                     ? <CheckCircle  size={16} className="text-emerald-400" />
                     : <AlertTriangle size={16} className="text-amber-400" />}
-                  <button className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors">
+                  <button
+                    onClick={() => setDrawer({ tab: "policies", editing: policy })}
+                    className="p-1.5 rounded hover:bg-aq-border/60 text-aq-dim hover:text-aq-blue-2 transition-colors"
+                    title="Edit policy"
+                  >
                     <Edit2 size={14} />
                   </button>
                 </div>
@@ -1006,35 +1309,53 @@ export default function GovernanceConsole() {
 
       {/* ── Slide-over drawers ── */}
       <SlideOver
-        open={drawer === "survivorship"}
+        open={drawer?.tab === "survivorship"}
         onClose={() => setDrawer(null)}
-        title={isGlobalView ? "New Survivorship Rule" : `New Survivorship Rule — ${viewId}`}
+        title={drawer?.editing ? "Edit Survivorship Rule" : "New Survivorship Rule"}
       >
         <SurvivorshipRuleForm
-          onSave={(data) => saveSurvivorshipMut.mutate({ ...data, viewId: viewId ?? null })}
+          key={String(drawer?.editing?.ruleId ?? "new-survivorship")}
+          initial={drawer?.editing ? ruleToSurvivorshipForm(drawer.editing) : undefined}
+          onSave={(data) => saveSurvivorshipMut.mutate(
+            drawer?.editing ? { ...data, ruleId: drawer.editing.ruleId } : data
+          )}
           onClose={() => setDrawer(null)}
+          views={enterpriseViews}
+          defaultViewId={defaultViewId}
         />
       </SlideOver>
 
       <SlideOver
-        open={drawer === "matching"}
+        open={drawer?.tab === "matching"}
         onClose={() => setDrawer(null)}
-        title={isGlobalView ? "New Matching Rule" : `New Matching Rule — ${viewId}`}
+        title={drawer?.editing ? "Edit Matching Rule" : "New Matching Rule"}
       >
         <MatchingRuleForm
-          onSave={(data) => saveMatchingMut.mutate({ ...data, viewId: viewId ?? null })}
+          key={String(drawer?.editing?.ruleId ?? "new-matching")}
+          initial={drawer?.editing ? ruleToMatchingForm(drawer.editing) : undefined}
+          onSave={(data) => saveMatchingMut.mutate(
+            drawer?.editing ? { ...data, ruleId: drawer.editing.ruleId } : data
+          )}
           onClose={() => setDrawer(null)}
+          views={enterpriseViews}
+          defaultViewId={defaultViewId}
         />
       </SlideOver>
 
       <SlideOver
-        open={drawer === "policies"}
+        open={drawer?.tab === "policies"}
         onClose={() => setDrawer(null)}
-        title={isGlobalView ? "New Data Policy" : `New Data Policy — ${viewId}`}
+        title={drawer?.editing ? "Edit Data Policy" : "New Data Policy"}
       >
         <PolicyForm
-          onSave={(data) => savePolicyMut.mutate({ ...data, viewId: viewId ?? null })}
+          key={String(drawer?.editing?.policyId ?? "new-policy")}
+          initial={drawer?.editing ? policyToForm(drawer.editing) : undefined}
+          onSave={(data) => savePolicyMut.mutate(
+            drawer?.editing ? { ...data, policyId: drawer.editing.policyId } : data
+          )}
           onClose={() => setDrawer(null)}
+          views={enterpriseViews}
+          defaultViewId={defaultViewId}
         />
       </SlideOver>
     </div>

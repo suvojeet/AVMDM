@@ -1,6 +1,7 @@
 import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { partyApi } from "../../services/api";
+import { formatDate, formatDateTime } from "../../utils/dateUtils";
 import {
   Star, Shield, CheckCircle, AlertTriangle, ArrowLeft,
   Database, Clock, Users, Layers, ChevronRight
@@ -48,7 +49,7 @@ export default function GoldenRecordView() {
     </div>
   );
 
-  const attrs = golden.goldenAttributes ? Object.entries(golden.goldenAttributes) : [];
+  const attrs = golden.goldenAttributes ? Object.entries(golden.goldenAttributes as Record<string, Record<string, any>>) : [];
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -115,7 +116,7 @@ export default function GoldenRecordView() {
           <span className="badge-info ml-auto">{attrs.length} attributes</span>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          {attrs.map(([key, attr]: [string, Record<string, unknown>]) => (
+          {attrs.map(([key, attr]: [string, Record<string, any>]) => (
             <div key={key} className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 min-w-0">
@@ -166,7 +167,7 @@ export default function GoldenRecordView() {
                 <div className="text-right">
                   <p className="text-xs text-slate-400">Last Updated</p>
                   <p className="text-xs text-slate-300">
-                    {src.sourceLastUpdated ? new Date(src.sourceLastUpdated).toLocaleDateString() : "—"}
+                    {formatDate(src.sourceLastUpdated as string)}
                   </p>
                 </div>
                 <button className="p-1.5 rounded hover:bg-slate-700 text-slate-400 hover:text-blue-400 transition-colors">
@@ -191,7 +192,7 @@ export default function GoldenRecordView() {
                 <span className="badge-warning">{evt.eventType}</span>
                 <span className="text-xs text-slate-400 flex-1">{evt.reason}</span>
                 <span className="text-xs text-slate-500">
-                  {evt.performedAt ? new Date(evt.performedAt).toLocaleString() : "—"}
+                  {formatDateTime(evt.performedAt as string)}
                 </span>
               </div>
             ))}

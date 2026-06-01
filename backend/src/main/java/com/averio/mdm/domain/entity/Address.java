@@ -29,8 +29,14 @@ public class Address {
     @Property("uspsBarcode") private String uspsBarcode;
     @Property("dpvConfirmation") private String dpvConfirmation;
     @Property("effectiveStartDate") private LocalDate effectiveStartDate;
-    @Property("effectiveEndDate") private LocalDate effectiveEndDate;
+    @Property("effectiveEndDate")   private LocalDate effectiveEndDate;
+    // GDPR soft-delete: endDate marks when address was removed; gdprPurgeDate = endDate + 7 years
+    @Property("endDate")            private LocalDate endDate;
+    @Property("gdprPurgeDate")      private LocalDate gdprPurgeDate;
+    @Property("endReason")          private String endReason;
     @Property("sourceSystem") private String sourceSystem;
-    @Property("createdAt") private LocalDateTime createdAt;
-    @Property("updatedAt") private LocalDateTime updatedAt;
+    @Property("createdAt")  private LocalDateTime createdAt;
+    @Property("updatedAt")  private LocalDateTime updatedAt;
+    @Property("createdBy")  private String createdBy;
+    @Property("updatedBy")  private String updatedBy;
 }

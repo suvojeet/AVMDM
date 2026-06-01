@@ -223,7 +223,7 @@ public class ClaudeNLPService {
                 candidates.forEach(p -> hits.add(SearchHit.fromPartyAsDuplicate(p)));
             }
             case "QUALITY_ANALYSIS" -> {
-                List<Party> lowQuality = partyRepository.findLowQualityParties(0.7, 20);
+                List<Party> lowQuality = partyRepository.findLowQualityParties(0.7);
                 lowQuality.forEach(p -> hits.add(SearchHit.fromPartyAsQualityIssue(p)));
             }
             default -> {

@@ -20,8 +20,8 @@ type DisplayType =
 interface ToolCallRecord {
   id: string;
   tool: string;
-  input: Record<string, unknown>;
-  result: Record<string, unknown>;
+  input: Record<string, any>;
+  result: Record<string, any>;
   displayType: DisplayType;
 }
 
@@ -60,7 +60,7 @@ const SUGGESTIONS = [
 
 // ── Small result renderers (compact for widget) ────────────────────────────
 
-function PartyRow({ p, navigate }: { p: Record<string, unknown>; navigate: (path: string) => void }) {
+function PartyRow({ p, navigate }: { p: Record<string, any>; navigate: (path: string) => void }) {
   const score = typeof p.dataQualityScore === "number" ? p.dataQualityScore : null;
   return (
     <div className="flex items-center justify-between gap-2 py-1.5 border-b border-slate-800 last:border-0 group">
@@ -89,8 +89,8 @@ function PartyRow({ p, navigate }: { p: Record<string, unknown>; navigate: (path
   );
 }
 
-function StatsGrid({ data }: { data: Record<string, unknown> }) {
-  const queue = data.stewardQueue as Record<string, unknown> | undefined;
+function StatsGrid({ data }: { data: Record<string, any> }) {
+  const queue = data.stewardQueue as Record<string, any> | undefined;
   const items = [
     { label: "Golden Records",  value: data.activeGoldenRecords, color: "text-blue-300" },
     { label: "Low Quality",     value: data.lowQualityParties,   color: "text-orange-300" },
@@ -110,7 +110,7 @@ function StatsGrid({ data }: { data: Record<string, unknown> }) {
   );
 }
 
-function GoldenRecordWidget({ g }: { g: Record<string, unknown> }) {
+function GoldenRecordWidget({ g }: { g: Record<string, any> }) {
   return (
     <div className="rounded bg-yellow-500/5 border border-yellow-500/20 p-2 space-y-1">
       <div className="flex items-center gap-1.5">
@@ -139,23 +139,23 @@ function ToolResultBlock({ tc, navigate }: { tc: ToolCallRecord; navigate: (path
 
   const body = (() => {
     if (tc.displayType === "ERROR") {
-      return <p className="text-[11px] text-red-400">{String((tc.result as Record<string, unknown>)?.error ?? "Error")}</p>;
+      return <p className="text-[11px] text-red-400">{String((tc.result as Record<string, any>)?.error ?? "Error")}</p>;
     }
     if (tc.displayType === "PARTY_LIST") {
-      const parties = (tc.result?.parties ?? []) as Record<string, unknown>[];
+      const parties = (tc.result?.parties ?? []) as Record<string, any>[];
       if (!parties.length) return <p className="text-[11px] text-slate-500">No results found.</p>;
       return <div>{parties.slice(0, 8).map((p, i) => <PartyRow key={i} p={p} navigate={navigate} />)}</div>;
     }
     if (tc.displayType === "PARTY_DETAIL") {
-      const p = tc.result?.party as Record<string, unknown> | undefined;
+      const p = tc.result?.party as Record<string, any> | undefined;
       return p ? <PartyRow p={p} navigate={navigate} /> : null;
     }
     if (tc.displayType === "GOLDEN_RECORD") {
-      const g = tc.result?.goldenRecord as Record<string, unknown> | undefined;
+      const g = tc.result?.goldenRecord as Record<string, any> | undefined;
       return g ? <GoldenRecordWidget g={g} /> : null;
     }
     if (tc.displayType === "TIMELINE") {
-      const events = (tc.result?.events ?? []) as Record<string, unknown>[];
+      const events = (tc.result?.events ?? []) as Record<string, any>[];
       if (!events.length) return <p className="text-[11px] text-slate-500">No events found.</p>;
       return (
         <div className="space-y-1">
@@ -170,8 +170,8 @@ function ToolResultBlock({ tc, navigate }: { tc: ToolCallRecord; navigate: (path
       );
     }
     if (tc.displayType === "STEWARD_QUEUE") {
-      const tasks   = (tc.result?.tasks   ?? []) as Record<string, unknown>[];
-      const summary = tc.result?.summary  as Record<string, unknown> | undefined;
+      const tasks   = (tc.result?.tasks   ?? []) as Record<string, any>[];
+      const summary = tc.result?.summary  as Record<string, any> | undefined;
       return (
         <div className="space-y-2">
           {summary && (

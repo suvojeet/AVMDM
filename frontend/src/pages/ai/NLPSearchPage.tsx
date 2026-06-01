@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { useLicense } from "../../context/LicenseContext";
+import { formatTime } from "../../utils/dateUtils";
+import AiDisabledBanner from "../../components/common/AiDisabledBanner";
 import {
   Search, Sparkles, Send, Loader2, Database, User, Building2,
   GitFork, FileText, Clock, AlertCircle, ChevronRight, Copy, Check
@@ -161,6 +164,7 @@ const SUGGESTED = [
 // ── Main component ─────────────────────────────────────────────────────────────
 
 export default function NLPSearchPage() {
+  const { hasAiAgent } = useLicense();
   const [searchParams] = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState(searchParams.get("q") ?? "");
@@ -178,6 +182,8 @@ export default function NLPSearchPage() {
     if (q) sendMessage(q);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  if (!hasAiAgent()) return <AiDisabledBanner feature="NLP Search" />;
 
   const sendMessage = async (text?: string) => {
     const query = (text ?? input).trim();
@@ -336,7 +342,7 @@ export default function NLPSearchPage() {
                 </div>
               )}
               <p className="text-[10px] text-aq-dim mt-1 px-1">
-                {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                {formatTime(msg.timestamp)}
               </p>
             </div>
 

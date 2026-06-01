@@ -455,8 +455,8 @@ export default function RelationshipGraph() {
           <GitFork size={18} className="text-indigo-400" />
         </div>
         <div className="flex-1">
-          <h1 className="text-xl font-bold text-aq-text">Relationship Graph Explorer</h1>
-          <p className="text-xs text-aq-dim">Visualize entity relationships — drag nodes to arrange, scroll to zoom</p>
+          <h1 className="text-xl font-bold text-aq-text">Search &amp; Relationship Graph</h1>
+          <p className="text-xs text-aq-dim">Search parties and visualize their relationship network — drag nodes to arrange, scroll to zoom</p>
         </div>
         <div className="flex items-center gap-2">
           {/* Search by name or ID */}

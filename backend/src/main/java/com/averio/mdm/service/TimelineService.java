@@ -6,6 +6,8 @@ import com.averio.mdm.repository.cosmos.TimelineRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
@@ -18,7 +20,9 @@ public class TimelineService {
 
     private final TimelineRepository timelineRepository;
     private final ObjectMapper objectMapper;
-    private final PartyService partyService;
+
+    @Lazy @Autowired
+    private PartyService partyService;
 
     public void recordEvent(TimelineEvent event) {
         timelineRepository.save(event);

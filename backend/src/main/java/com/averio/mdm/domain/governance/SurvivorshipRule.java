@@ -7,9 +7,10 @@ import lombok.*;
 import org.springframework.data.annotation.Id;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "survivorship-rules", ru = "400")
+@Container(containerName = "survivorship-rules", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class SurvivorshipRule {
 
@@ -30,6 +31,7 @@ public class SurvivorshipRule {
     private Boolean isSupremacy;        // If true, this source always wins
 
     private List<String> sourceSystemPriority;  // Ordered list: ["CRM","ERP","LEGACY"]
+    private List<Map<String, Object>> sourcePriorities;  // [{source:"HRM",priority:1},{source:"Banking",priority:2}]
 
     private String supremacySourceSystem;
 

@@ -76,7 +76,7 @@ public interface PartyRepository extends Neo4jRepository<Party, Long> {
 
     @Query("""
         MATCH (p:Party)
-        WHERE p.status = 'ACTIVE' AND p.isGolden = true
+        WHERE p.isGolden = true AND (p.status IS NULL OR p.status = 'ACTIVE')
         RETURN count(p) AS total
         """)
     long countActiveGoldenParties();
@@ -123,4 +123,12 @@ public interface PartyRepository extends Neo4jRepository<Party, Long> {
         ORDER BY child.organizationName
         """)
     List<Party> findDirectSubsidiaries(@Param("globalId") String globalId);
+
+    @Query("""
+        MATCH (p:Party)
+        WHERE p.sourceSystemId = $sourceSystemId
+        RETURN p
+        LIMIT 5
+        """)
+    List<Party> findBySourceSystemIdOnly(@Param("sourceSystemId") String sourceSystemId);
 }

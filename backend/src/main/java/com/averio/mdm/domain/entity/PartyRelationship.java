@@ -26,5 +26,6 @@ public class PartyRelationship {
     @Property("createdAt") private LocalDateTime createdAt;
     @Property("updatedAt") private LocalDateTime updatedAt;
     @Property("createdBy") private String createdBy;
+    @Property("updatedBy") private String updatedBy;
     @TargetNode private Party targetParty;
 }

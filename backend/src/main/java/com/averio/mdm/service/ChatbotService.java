@@ -37,6 +37,7 @@ public class ChatbotService {
     private final RestTemplate restTemplate;
     private final ObjectMapper objectMapper;
 
+    // ── Anthropic Claude ──────────────────────────────────────────────────────
     @Value("${averio.claude.api-key:}")
     private String claudeApiKey;
 
@@ -46,6 +47,24 @@ public class ChatbotService {
     @Value("${averio.claude.enabled:false}")
     private boolean claudeEnabled;
 
+    // ── AI Agent master toggle + provider routing ─────────────────────────────
+    @Value("${averio.ai.agent.enabled:true}")
+    private boolean aiAgentEnabled;
+
+    @Value("${averio.ai.agent.provider:ANTHROPIC}")
+    private String aiAgentProvider;
+
+    // ── Azure OpenAI ──────────────────────────────────────────────────────────
+    @Value("${averio.ai.endpoint:}")
+    private String azureOpenAiEndpoint;
+
+    @Value("${averio.ai.api-key:}")
+    private String azureOpenAiKey;
+
+    @Value("${averio.ai.deployment-name:gpt-4}")
+    private String azureOpenAiDeployment;
+
+    private static final String AZURE_OPENAI_API_VERSION = "2024-02-15-preview";
     private static final String CLAUDE_API_URL = "https://api.anthropic.com/v1/messages";
     private static final int MAX_TOOL_ROUNDS = 6;
 
@@ -76,6 +95,28 @@ public class ChatbotService {
     // ── Public API ─────────────────────────────────────────────────────────────
 
     public ChatbotResponse chat(String userMessage, List<Map<String, String>> history) {
+        if (!aiAgentEnabled) {
+            return ChatbotResponse.builder()
+                    .reply("The AI Agent module is not enabled on this license. " +
+                            "Please contact your administrator or upgrade your Averio MDM subscription.")
+                    .toolCalls(List.of())
+                    .model("disabled")
+                    .build();
+        }
+
+        if ("AZURE_OPENAI".equalsIgnoreCase(aiAgentProvider)) {
+            if (azureOpenAiEndpoint.isBlank() || azureOpenAiKey.isBlank()) {
+                return ChatbotResponse.builder()
+                        .reply("Azure OpenAI is selected as the AI provider but is not fully configured. " +
+                                "Set `AZURE_OPENAI_ENDPOINT` and `AZURE_OPENAI_KEY` environment variables.")
+                        .toolCalls(List.of())
+                        .model("azure-unconfigured")
+                        .build();
+            }
+            return chatWithAzureOpenAI(userMessage, history);
+        }
+
+        // Default: Anthropic Claude
         if (!claudeEnabled || claudeApiKey.isBlank()) {
             return ChatbotResponse.builder()
                     .reply("AverioAI Chatbot requires Claude AI to be configured. " +
@@ -197,6 +238,123 @@ public class ChatbotService {
 
         if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
             throw new RuntimeException("Claude API returned " + response.getStatusCode());
+        }
+        return response.getBody();
+    }
+
+    // ── Azure OpenAI chat (GPT-4 function calling) ────────────────────────────
+
+    @SuppressWarnings("unchecked")
+    private ChatbotResponse chatWithAzureOpenAI(String userMessage, List<Map<String, String>> history) {
+        try {
+            List<Map<String, Object>> messages = new ArrayList<>();
+            messages.add(Map.of("role", "system", "content", SYSTEM_PROMPT));
+
+            if (history != null) {
+                for (Map<String, String> msg : history) {
+                    messages.add(Map.of("role", msg.getOrDefault("role", "user"), "content", msg.getOrDefault("content", "")));
+                }
+            }
+            messages.add(Map.of("role", "user", "content", userMessage));
+
+            List<ToolCallRecord> allToolCalls = new ArrayList<>();
+            String finalReply = "";
+            int rounds = 0;
+
+            while (rounds < MAX_TOOL_ROUNDS) {
+                rounds++;
+                Map<String, Object> response = callAzureOpenAIAPI(messages);
+
+                List<Map<String, Object>> choices = (List<Map<String, Object>>) response.get("choices");
+                if (choices == null || choices.isEmpty()) break;
+
+                Map<String, Object> message = (Map<String, Object>) choices.get(0).get("message");
+                String finishReason = (String) choices.get(0).get("finish_reason");
+                String content = message.get("content") != null ? (String) message.get("content") : "";
+                List<Map<String, Object>> toolCalls = (List<Map<String, Object>>) message.get("tool_calls");
+
+                finalReply = content;
+
+                if (toolCalls == null || toolCalls.isEmpty() || "stop".equals(finishReason)) break;
+
+                // Add assistant message with tool_calls to history
+                messages.add(message);
+
+                // Execute tools
+                for (Map<String, Object> tc : toolCalls) {
+                    String callId   = (String) tc.get("id");
+                    Map<String, Object> fn = (Map<String, Object>) tc.get("function");
+                    String toolName = (String) fn.get("name");
+                    String argsJson = (String) fn.getOrDefault("arguments", "{}");
+
+                    Map<String, Object> input;
+                    try { input = objectMapper.readValue(argsJson, Map.class); }
+                    catch (Exception ex) { input = Map.of(); }
+
+                    ToolExecutionResult execResult = executeTool(toolName, input);
+                    allToolCalls.add(ToolCallRecord.builder()
+                            .id(callId).tool(toolName).input(input)
+                            .result(execResult.data()).displayType(execResult.displayType()).build());
+
+                    messages.add(Map.of(
+                            "role", "tool",
+                            "tool_call_id", callId,
+                            "content", execResult.jsonSummary()
+                    ));
+                }
+            }
+
+            return ChatbotResponse.builder()
+                    .reply(finalReply.isBlank() ? "I processed your request." : finalReply)
+                    .toolCalls(allToolCalls)
+                    .model("azure-" + azureOpenAiDeployment)
+                    .build();
+
+        } catch (Exception e) {
+            log.error("Azure OpenAI chatbot error: {}", e.getMessage(), e);
+            return ChatbotResponse.builder()
+                    .reply("Azure OpenAI encountered an error: " + e.getMessage())
+                    .toolCalls(List.of())
+                    .model("azure-" + azureOpenAiDeployment)
+                    .build();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> callAzureOpenAIAPI(List<Map<String, Object>> messages) {
+        String base = azureOpenAiEndpoint.endsWith("/")
+                ? azureOpenAiEndpoint.substring(0, azureOpenAiEndpoint.length() - 1)
+                : azureOpenAiEndpoint;
+        String url = base +
+                "/openai/deployments/" + azureOpenAiDeployment +
+                "/chat/completions?api-version=" + AZURE_OPENAI_API_VERSION;
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.set("api-key", azureOpenAiKey);
+
+        // Convert Anthropic tool definitions → OpenAI function format
+        List<Map<String, Object>> tools = buildToolDefinitions().stream()
+                .map(t -> Map.<String, Object>of(
+                        "type", "function",
+                        "function", Map.of(
+                                "name",        t.get("name"),
+                                "description", t.get("description"),
+                                "parameters",  t.containsKey("input_schema") ? t.get("input_schema") : Map.of()
+                        )
+                )).toList();
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("messages", messages);
+        body.put("max_tokens", 4096);
+        body.put("tools", tools);
+        body.put("tool_choice", "auto");
+
+        HttpEntity<Map<String, Object>> entity = new HttpEntity<>(body, headers);
+        ResponseEntity<Map> response = restTemplate.postForEntity(url, entity, Map.class);
+
+        if (!response.getStatusCode().is2xxSuccessful() || response.getBody() == null) {
+            throw new RuntimeException("Azure OpenAI API returned " + response.getStatusCode());
         }
         return response.getBody();
     }
@@ -486,8 +644,8 @@ public class ChatbotService {
         m.put("completenessScore", g.getCompletenessScore());
         m.put("sourceRecordCount", g.getSourceRecords() != null ? g.getSourceRecords().size() : 0);
         m.put("mergeHistory", g.getMergeHistory() != null ? g.getMergeHistory().size() : 0);
-        if (g.getAttributes() != null) {
-            m.put("attributeCount", g.getAttributes().size());
+        if (g.getGoldenAttributes() != null) {
+            m.put("attributeCount", g.getGoldenAttributes().size());
         }
         return m;
     }

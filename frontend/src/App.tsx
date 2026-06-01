@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { MemoryRouter, Routes, Route, Navigate } from "react-router-dom";
 import Layout from "./components/layout/Layout";
 import ProtectedRoute from "./components/layout/ProtectedRoute";
 import { LicenseProvider, useLicense, Module } from "./context/LicenseContext";
@@ -7,13 +7,13 @@ import Dashboard from "./pages/Dashboard";
 import PartyList from "./pages/party/PartyList";
 import PartyDetail from "./pages/party/PartyDetail";
 import GoldenRecordView from "./pages/party/GoldenRecordView";
-import GoldenRecordsList from "./pages/party/GoldenRecordsList";
+import GoldenView from "./pages/party/GoldenView";
 import CreateParty from "./pages/party/CreateParty";
 import PartyHierarchy from "./pages/party/PartyHierarchy";
 import RelationshipGraph from "./pages/relationship/RelationshipGraph";
+import ManageRelationships from "./pages/relationship/ManageRelationships";
 import PartyTimeline from "./pages/timeline/PartyTimeline";
 import GovernanceConsole from "./pages/governance/GovernanceConsole";
-import EnterpriseViews from "./pages/governance/EnterpriseViews";
 import StewardConsole from "./pages/steward/StewardConsole";
 import AIAssistant from "./pages/ai/AIAssistant";
 import NLPSearchPage from "./pages/ai/NLPSearchPage";
@@ -28,6 +28,12 @@ import AgreementDetail from "./pages/agreement/AgreementDetail";
 import LockedModulePage from "./pages/license/LockedModulePage";
 import SystemLogs from "./pages/audit/SystemLogs";
 import ReferenceData from "./pages/reference-data/ReferenceData";
+import GoldenIdDocs from "./pages/docs/GoldenIdDocs";
+import TimelineDocs from "./pages/docs/TimelineDocs";
+import MatchingDocs from "./pages/docs/MatchingDocs";
+import TestLabDocs from "./pages/docs/TestLabDocs";
+import TestLab from "./pages/testlab/TestLab";
+import HelpDocs from "./pages/help/HelpDocs";
 
 // ── License gate wrapper ───────────────────────────────────────────────────
 
@@ -42,7 +48,7 @@ function ModuleRoute({ module, children }: { module: Module; children: React.Rea
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <MemoryRouter>
       <Routes>
         <Route path="/login" element={<Login />} />
         <Route element={<ProtectedRoute />}>
@@ -64,9 +70,6 @@ export default function App() {
             <Route path="parties/hierarchy" element={
               <ModuleRoute module="PARTY"><PartyHierarchy /></ModuleRoute>
             } />
-            <Route path="parties/golden-records" element={
-              <ModuleRoute module="PARTY"><GoldenRecordsList /></ModuleRoute>
-            } />
             <Route path="parties/:globalId" element={
               <ModuleRoute module="PARTY"><PartyDetail /></ModuleRoute>
             } />
@@ -82,9 +85,15 @@ export default function App() {
             <Route path="accounts/:globalAccountId" element={
               <ModuleRoute module="ACCOUNT"><AccountDetail /></ModuleRoute>
             } />
-            <Route path="relationships" element={
-              <ModuleRoute module="RELATIONSHIP"><RelationshipGraph /></ModuleRoute>
-            } />
+            <Route path="relationships">
+              <Route index element={<Navigate to="/relationships/manage" replace />} />
+              <Route path="manage" element={
+                <ModuleRoute module="RELATIONSHIP"><ManageRelationships /></ModuleRoute>
+              } />
+              <Route path="graph" element={
+                <ModuleRoute module="RELATIONSHIP"><RelationshipGraph /></ModuleRoute>
+              } />
+            </Route>
 
             {/* ── Licensed: Advanced+ ── */}
             <Route path="agreements" element={
@@ -102,9 +111,12 @@ export default function App() {
               <ModuleRoute module="PRODUCT"><ProductDetail /></ModuleRoute>
             } />
 
+            <Route path="golden-view" element={
+              <ModuleRoute module="PARTY"><GoldenView /></ModuleRoute>
+            } />
+
             {/* ── Platform features — always available ── */}
             <Route path="governance"          element={<GovernanceConsole />} />
-            <Route path="enterprise-views"    element={<EnterpriseViews />} />
             <Route path="steward"      element={<StewardConsole />} />
             <Route path="ai-assistant" element={<AIAssistant />} />
             <Route path="nlp-search"   element={<NLPSearchPage />} />
@@ -112,10 +124,16 @@ export default function App() {
             <Route path="ml-matching"  element={<MLMatchInsights />} />
             <Route path="audit-logs"       element={<SystemLogs />} />
             <Route path="reference-data"   element={<ReferenceData />} />
+            <Route path="docs/golden-id"   element={<GoldenIdDocs />} />
+            <Route path="docs/timeline"    element={<TimelineDocs />} />
+            <Route path="docs/matching"    element={<MatchingDocs />} />
+            <Route path="docs/test-lab"    element={<TestLabDocs />} />
+            <Route path="test-lab"         element={<TestLab />} />
+            <Route path="help"             element={<HelpDocs />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
-    </BrowserRouter>
+    </MemoryRouter>
   );
 }

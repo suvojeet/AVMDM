@@ -5,6 +5,7 @@ import com.averio.mdm.domain.ml.MatchingFeedback;
 import com.averio.mdm.domain.ml.MLMatchModel;
 import com.averio.mdm.domain.ml.SoftMatchResult;
 import com.averio.mdm.domain.steward.StewardTask;
+import com.averio.mdm.engine.matching.BlockingKeyService;
 import com.averio.mdm.repository.cosmos.MatchingFeedbackRepository;
 import com.averio.mdm.repository.cosmos.MLMatchModelRepository;
 import com.averio.mdm.repository.cosmos.StewardTaskRepository;
@@ -29,6 +30,7 @@ public class MLMatchingService {
     private final StewardTaskRepository       stewardTaskRepository;
     private final PartyRepository             partyRepository;
     private final FeatureExtractorService     featureExtractor;
+    private final BlockingKeyService          blockingKeyService;
 
     private static final int    MIN_TRAIN_EXAMPLES = 5;
     private static final int    MAX_ITERATIONS     = 500;
@@ -233,14 +235,21 @@ public class MLMatchingService {
         return sigmoid(dot(w, x));
     }
 
-    // ── Soft-match scan ──────────────────────────────────────────────────────
+    // ── Soft-match scan (blocking-accelerated) ───────────────────────────────
 
+    /**
+     * Find soft-match suggestions using the blocking index.
+     *
+     * Complexity: O(N × k) instead of the previous O(N²), where k is the average
+     * blocking bucket size (typically 10–100). At 1 M golden records this reduces
+     * comparisons from ~500 B to ~50 M — a 10,000× speedup.
+     */
     public List<SoftMatchResult> getSoftMatchSuggestions(String entityType, int limit) {
         Optional<MLMatchModel> modelOpt = modelRepository.findByEntityType(entityType);
-        double softThreshold  = modelOpt.map(MLMatchModel::getSoftMatchThreshold).orElse(SOFT_MATCH_DEFAULT);
-        double autoThreshold  = modelOpt.map(MLMatchModel::getAutoLinkThreshold).orElse(AUTO_LINK_DEFAULT);
+        double softThreshold = modelOpt.map(MLMatchModel::getSoftMatchThreshold).orElse(SOFT_MATCH_DEFAULT);
+        double autoThreshold = modelOpt.map(MLMatchModel::getAutoLinkThreshold).orElse(AUTO_LINK_DEFAULT);
 
-        // Collect unresolved MATCH_REVIEW tasks to know which pairs already have tasks
+        // Pairs that already have an open steward task — skip them
         Set<String> existingPairs = StreamSupport
                 .stream(stewardTaskRepository.findAll().spliterator(), false)
                 .filter(t -> "MATCH_REVIEW".equals(t.getTaskType()) && !"RESOLVED".equals(t.getStatus()))
@@ -248,30 +257,38 @@ public class MLMatchingService {
                 .map(t -> pairKey(t.getCandidateIds().get(0), t.getCandidateIds().get(1)))
                 .collect(Collectors.toSet());
 
-        // Load golden records of the target type for pairwise comparison
+        // Load golden records of the target type and build a fast lookup map
         List<Party> goldens = partyRepository.findByIsGoldenTrue().stream()
                 .filter(p -> entityType.equalsIgnoreCase(p.getPartyType()))
-                .limit((long) limit * 4)
                 .collect(Collectors.toList());
 
-        List<SoftMatchResult> results = new ArrayList<>();
-        Set<String> seen = new HashSet<>();
+        Map<String, Party> goldenMap = goldens.stream()
+                .filter(p -> p.getGlobalId() != null)
+                .collect(Collectors.toMap(Party::getGlobalId, p -> p, (a, b) -> a));
 
-        for (int i = 0; i < goldens.size() && results.size() < limit; i++) {
-            for (int j = i + 1; j < goldens.size() && results.size() < limit; j++) {
-                Party a = goldens.get(i);
-                Party b = goldens.get(j);
+        List<SoftMatchResult> results = new ArrayList<>();
+        Set<String> seenPairs = new HashSet<>();
+
+        // For each golden record, use blocking to fetch only its likely candidates
+        for (Party a : goldens) {
+            if (results.size() >= limit) break;
+
+            Set<String> candidateIds = blockingKeyService.findCandidates(a);
+            for (String candidateId : candidateIds) {
+                if (results.size() >= limit) break;
+
+                Party b = goldenMap.get(candidateId);
+                if (b == null) continue;
+
                 String key = pairKey(a.getGlobalId(), b.getGlobalId());
-                if (seen.contains(key)) continue;
-                seen.add(key);
+                if (!seenPairs.add(key)) continue;  // already evaluated this pair
 
                 Map<String, Double> fv = featureExtractor.extract(a, b);
                 double score = scoreFeatureVector(fv, entityType);
 
                 if (score < softThreshold || score >= autoThreshold) continue;
 
-                String confidence = score >= 0.75 ? "HIGH" : score >= 0.55 ? "MEDIUM" : "LOW";
-                String topFeature = topFeature(fv);
+                String confidence    = score >= 0.75 ? "HIGH"         : score >= 0.55 ? "MEDIUM"  : "LOW";
                 String recommendation = score >= 0.75 ? "SUGGEST_MERGE" : score >= 0.55 ? "REVIEW" : "MONITOR";
 
                 results.add(SoftMatchResult.builder()
@@ -288,7 +305,7 @@ public class MLMatchingService {
                         .mlScore(score)
                         .confidence(confidence)
                         .featureVector(fv)
-                        .topFeature(topFeature)
+                        .topFeature(topFeature(fv))
                         .existingTask(existingPairs.contains(key))
                         .recommendation(recommendation)
                         .build());

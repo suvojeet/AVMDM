@@ -28,11 +28,14 @@ export interface LicenseInfo {
   description: string;
   modules: ModuleStatus[];
   tiers: TierSummary[];
+  aiAgentEnabled: boolean;
+  aiProvider: string;       // "ANTHROPIC" | "AZURE_OPENAI"
 }
 
 interface LicenseContextValue {
   license: LicenseInfo;
   hasModule: (module: Module) => boolean;
+  hasAiAgent: () => boolean;
   isLoading: boolean;
 }
 
@@ -44,6 +47,8 @@ const DEFAULT_LICENSE: LicenseInfo = {
   description: "",
   modules: [],
   tiers: [],
+  aiAgentEnabled: true,
+  aiProvider: "ANTHROPIC",
 };
 
 const TIER_ORDER: Record<Tier, number> = { STANDARD: 0, ADVANCED: 1, FULL: 2 };
@@ -53,6 +58,7 @@ const TIER_ORDER: Record<Tier, number> = { STANDARD: 0, ADVANCED: 1, FULL: 2 };
 const LicenseContext = createContext<LicenseContextValue>({
   license: DEFAULT_LICENSE,
   hasModule: () => true,
+  hasAiAgent: () => true,
   isLoading: true,
 });
 
@@ -71,8 +77,13 @@ export function LicenseProvider({ children }: { children: ReactNode }) {
     return license.modules.find((m) => m.module === module)?.enabled ?? false;
   };
 
+  const hasAiAgent = (): boolean => {
+    if (!data) return true; // optimistic while loading
+    return license.aiAgentEnabled ?? true;
+  };
+
   return (
-    <LicenseContext.Provider value={{ license, hasModule, isLoading }}>
+    <LicenseContext.Provider value={{ license, hasModule, hasAiAgent, isLoading }}>
       {children}
     </LicenseContext.Provider>
   );

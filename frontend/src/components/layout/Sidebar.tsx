@@ -3,7 +3,8 @@ import {
   LayoutDashboard, Users, GitFork, Shield, ClipboardList, Bot,
   Database, ChevronLeft, ChevronRight, Settings, HelpCircle,
   Search, Sparkles, LogOut, Building2, Package, FileText,
-  Lock, Network, Brain, ChevronDown, Clock, Star, ScrollText, Layers,
+  Lock, Network, Brain, ChevronDown, Clock, Star, ScrollText,
+  Edit2, BarChart2, FlaskConical,
 } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
@@ -45,18 +46,26 @@ const mainNav: NavEntry[] = [
     icon: Users,
     module: "PARTY" as Module,
     children: [
-      { to: "/parties",                icon: Users,   label: "Party Master"    },
-      { to: "/parties/hierarchy",      icon: Network, label: "Party Hierarchy" },
-      { to: "/parties/golden-records", icon: Star,    label: "Golden Records"  },
-      { to: "/parties/timeline",       icon: Clock,   label: "Timeline"        },
+      { to: "/parties",           icon: Users,   label: "Party Master"    },
+      { to: "/parties/hierarchy", icon: Network, label: "Party Hierarchy" },
+      { to: "/parties/timeline",  icon: Clock,   label: "Timeline"        },
     ],
   },
+  { kind: "item", to: "/golden-view",   icon: Star,         label: "Golden View",        module: "PARTY"        as Module },
   { kind: "item", to: "/accounts",      icon: Building2,    label: "Account Master",     module: "ACCOUNT"      as Module },
   { kind: "item", to: "/agreements",    icon: FileText,     label: "Agreement Master",   module: "AGREEMENT"    as Module, requiredTier: "ADVANCED" },
   { kind: "item", to: "/products",      icon: Package,      label: "Product Master",     module: "PRODUCT"      as Module, requiredTier: "FULL" },
-  { kind: "item", to: "/relationships", icon: GitFork,      label: "Relationship Graph", module: "RELATIONSHIP" as Module },
+  {
+    kind: "group",
+    label: "Relationship Master",
+    icon: GitFork,
+    module: "RELATIONSHIP" as Module,
+    children: [
+      { to: "/relationships/manage", icon: Edit2,    label: "Manage Relationships" },
+      { to: "/relationships/graph",  icon: BarChart2, label: "Search & Graph"       },
+    ],
+  },
   { kind: "item", to: "/governance",         icon: Shield,       label: "Governance" },
-  { kind: "item", to: "/enterprise-views",   icon: Layers,       label: "Enterprise Views" },
   { kind: "item", to: "/steward",            icon: ClipboardList, label: "Steward Console" },
 ];
 
@@ -64,7 +73,7 @@ const aiNav: NavItemDef[] = [
   { kind: "item", to: "/ai-assistant", icon: Bot,      label: "AI Assistant", badge: "AI" },
   { kind: "item", to: "/nlp-search",   icon: Search,   label: "NLP Search",   badge: "AI" },
   { kind: "item", to: "/ml-matching",  icon: Brain,    label: "ML Matching",  badge: "ML" },
-  { kind: "item", to: "/studio",       icon: Sparkles, label: "Studio Guide" },
+  { kind: "item", to: "/studio",       icon: Sparkles, label: "Studio Guide", badge: "AI" },
 ];
 
 const secondaryNav: NavItemDef[] = [
@@ -414,6 +423,15 @@ export default function Sidebar() {
           <p className="text-[10px] font-semibold text-aq-dim px-3 py-1.5 uppercase tracking-widest">
             Administration
           </p>
+        )}
+        {(user?.role === "ADMIN" || user?.role === "TESTER") && (
+          <NavItem
+            to="/test-lab"
+            icon={FlaskConical}
+            label="Test Laboratory"
+            badge="QA"
+            collapsed={collapsed}
+          />
         )}
         {secondaryNav.map(renderEntry)}
       </nav>

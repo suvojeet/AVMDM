@@ -7,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
+import java.util.stream.StreamSupport;
 
 @Slf4j
 @Service
@@ -16,7 +17,13 @@ public class SearchService {
     private final PartyRepository partyRepository;
 
     public Map<String, Object> globalSearch(String query, int page, int size) {
-        List<Party> results = partyRepository.fullTextSearch(query, size * (page + 1));
+        List<Party> results;
+        if (query == null || query.isBlank() || "*".equals(query.trim())) {
+            results = StreamSupport.stream(partyRepository.findAll().spliterator(), false)
+                    .collect(java.util.stream.Collectors.toList());
+        } else {
+            results = partyRepository.fullTextSearch(query.trim(), size * (page + 1));
+        }
         int start = page * size;
         List<Party> paged = results.subList(Math.min(start, results.size()), Math.min(start + size, results.size()));
 

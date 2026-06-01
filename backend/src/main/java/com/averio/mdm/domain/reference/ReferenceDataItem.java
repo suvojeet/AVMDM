@@ -5,8 +5,11 @@ import com.azure.spring.data.cosmos.core.mapping.PartitionKey;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Version;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Map;
 
 /**
  * A single reference data entry.
@@ -17,7 +20,7 @@ import java.time.LocalDateTime;
  *   code: 100002  value: "Trust"
  */
 @Data @Builder @NoArgsConstructor @AllArgsConstructor
-@Container(containerName = "reference-data", ru = "400")
+@Container(containerName = "reference-data", autoCreateContainer = false)
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class ReferenceDataItem {
 
@@ -31,10 +34,19 @@ public class ReferenceDataItem {
     private String value;            // display label — e.g. "Banking"
     private String description;      // optional long description
 
-    private Boolean isActive;
-    private Integer sortOrder;
+    private Boolean   isActive;
+    private Integer   sortOrder;
+    private LocalDate expiryDate;   // scheduled retirement — item hidden from modules when past
+    private LocalDate endDate;      // soft-delete date — set when admin deletes; null means live
+    private String    deletedBy;    // who soft-deleted this item
+
+    private Map<String, Object> attributes;  // custom attributes as defined by the category schema
 
     private String        createdBy;
+    private String        updatedBy;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    @Version
+    private String _etag;  // Cosmos DB optimistic-locking ETag
 }

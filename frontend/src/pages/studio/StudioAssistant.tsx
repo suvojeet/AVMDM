@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import clsx from "clsx";
 import AverioLogo from "../../components/common/AverioLogo";
+import { formatTime } from "../../utils/dateUtils";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -293,8 +294,8 @@ export default function StudioAssistant() {
           /* Welcome screen */
           <div className="px-6 py-8 flex flex-col items-center text-center gap-6 max-w-3xl mx-auto">
             <div className="relative">
-              <div className="w-20 h-20 rounded-2xl overflow-hidden border border-aq-blue/20">
-                <AverioLogo size="md" showText={false} className="w-full h-full" />
+              <div className="w-20 h-20 rounded-2xl border border-aq-blue/20 flex items-center justify-center">
+                <AverioLogo size="xl" showText={false} />
               </div>
               <div className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-gradient-to-br from-aq-blue to-aq-purple
                               flex items-center justify-center border-2 border-aq-dark">
@@ -389,7 +390,7 @@ export default function StudioAssistant() {
                     </div>
                   )}
                   <p className="text-[10px] text-aq-dim mt-1 px-1">
-                    {msg.timestamp.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                    {formatTime(msg.timestamp)}
                   </p>
                 </div>
                 {msg.role === "user" && (

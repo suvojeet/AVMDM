@@ -1,7 +1,8 @@
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { partyApi } from "../../services/api";
-import { ArrowLeft, Clock, GitMerge, Edit2, Plus, RotateCcw, AlertTriangle, CheckCircle } from "lucide-react";
+import { formatDateTime } from "../../utils/dateUtils";
+import { ArrowLeft, Clock, GitMerge, Edit2, Plus, RotateCcw, AlertTriangle, CheckCircle, HelpCircle } from "lucide-react";
 import clsx from "clsx";
 
 const eventIcon = (type: string) => ({
@@ -53,8 +54,12 @@ export default function PartyTimeline() {
             </p>
           </div>
         </div>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
           <span className="badge-info">{events.length} events</span>
+          <Link to="/docs/timeline"
+            className="flex items-center gap-1.5 text-xs text-aq-dim hover:text-aq-blue-2 transition-colors border border-aq-border hover:border-aq-blue/30 rounded-lg px-2.5 py-1.5">
+            <HelpCircle size={12} /> How it works
+          </Link>
         </div>
       </div>
 
@@ -64,16 +69,24 @@ export default function PartyTimeline() {
           <p className="text-slate-400">Loading timeline...</p>
         </div>
       ) : events.length === 0 ? (
-        <div className="card text-center py-16">
-          <Clock size={40} className="mx-auto text-slate-600 mb-4" />
-          <p className="text-slate-400">No timeline events found</p>
+        <div className="card text-center py-16 space-y-3">
+          <Clock size={40} className="mx-auto text-slate-600 mb-2" />
+          <p className="text-slate-300 font-semibold">No timeline events found</p>
+          <p className="text-slate-500 text-sm max-w-md mx-auto">
+            This is most often because the party has no Golden ID assigned, was created before timeline
+            recording was active, or was created via an older version of the software.
+          </p>
+          <Link to="/docs/timeline#empty"
+            className="inline-flex items-center gap-1.5 text-xs text-aq-blue-2 hover:underline mt-1">
+            <HelpCircle size={12} /> Why is the timeline empty? →
+          </Link>
         </div>
       ) : (
         <div className="relative">
           {/* Timeline line */}
           <div className="absolute left-8 top-0 bottom-0 w-px bg-slate-700" />
           <div className="space-y-6">
-            {events.map((evt: Record<string, unknown>, i: number) => {
+            {events.map((evt: Record<string, any>, i: number) => {
               const Icon = eventIcon(String(evt.eventType ?? ""));
               const colorClass = eventColor(String(evt.eventType ?? ""));
               return (
@@ -106,7 +119,7 @@ export default function PartyTimeline() {
                       </div>
                       <div className="text-right flex-shrink-0">
                         <p className="text-xs text-slate-400">
-                          {evt.eventTimestamp ? new Date(String(evt.eventTimestamp)).toLocaleString() : "—"}
+                          {formatDateTime(evt.eventTimestamp as string)}
                         </p>
                         <p className="text-xs text-slate-500">{String(evt.changedBy ?? evt.sourceSystem ?? "SYSTEM")}</p>
                         {Boolean(evt.isRestorable) && (

@@ -7,14 +7,11 @@ import com.averio.mdm.engine.survivorship.SurvivorshipEngine;
 import com.averio.mdm.repository.neo4j.PartyRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.cache.annotation.CacheEvict;
-import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -25,19 +22,20 @@ public class GoldenRecordService {
     private final SurvivorshipEngine survivorshipEngine;
     private final GovernanceService governanceService;
 
-    @Cacheable(value = "goldenRecords", key = "#goldenRecordId")
-    public GoldenRecord getGoldenRecord(String goldenRecordId) {
-        List<Party> sources = partyRepository.findSourceRecordsByGoldenId(goldenRecordId);
-        if (sources.isEmpty()) {
-            sources = partyRepository.findByGoldenRecordId(goldenRecordId);
-        }
+    public GoldenRecord getGoldenRecordForView(String goldenRecordId, String viewId) {
+        List<Party> sources = partyRepository.findByGoldenRecordId(goldenRecordId);
         if (sources.isEmpty()) return null;
+        List<SurvivorshipRule> rules = governanceService.getActiveSurvivorshipRules("PARTY", viewId);
+        return survivorshipEngine.buildGoldenRecord(sources, rules, goldenRecordId);
+    }
 
+    public GoldenRecord getGoldenRecord(String goldenRecordId) {
+        List<Party> sources = partyRepository.findByGoldenRecordId(goldenRecordId);
+        if (sources.isEmpty()) return null;
         List<SurvivorshipRule> rules = governanceService.getActiveSurvivorshipRules("PARTY");
         return survivorshipEngine.buildGoldenRecord(sources, rules, goldenRecordId);
     }
 
-    @CacheEvict(value = "goldenRecords", key = "#goldenRecordId")
     public GoldenRecord refreshGoldenRecord(String goldenRecordId, String triggeredBy) {
         log.info("Refreshing golden record {} triggered by {}", goldenRecordId, triggeredBy);
         List<Party> sources = partyRepository.findByGoldenRecordId(goldenRecordId);

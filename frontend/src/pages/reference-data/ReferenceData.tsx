@@ -4,7 +4,7 @@ import { referenceDataApi, referenceCategoryApi } from "../../services/api";
 import {
   Database, Plus, Search, ChevronDown, ChevronRight,
   Edit2, Trash2, X, CheckCircle, Hash, Tag, Settings,
-  AlertCircle, Save, Shield, Calendar, User, RotateCcw, Clock,
+  AlertCircle, Save, Shield, Calendar, User, RotateCcw, Clock, RefreshCw,
 } from "lucide-react";
 import { formatDateTime } from "../../utils/dateUtils";
 import clsx from "clsx";
@@ -848,6 +848,14 @@ export default function ReferenceData() {
     onSuccess: () => invalidateAll(),
   });
 
+  const reseedMut = useMutation({
+    mutationFn: () => referenceDataApi.reseed(),
+    onSuccess: (data: { seeded: number; alreadyPresent: number }) => {
+      invalidateAll();
+      alert(`Sync complete — ${data.seeded} new items added, ${data.alreadyPresent} already present.`);
+    },
+  });
+
   const groupedData = grouped as Record<string, RefItem[]>;
   const totalItems = Object.values(groupedData).reduce((s, v) => s + v.length, 0);
 
@@ -899,17 +907,28 @@ export default function ReferenceData() {
             </p>
           </div>
         </div>
-        {tab === "items" && (
-          <div className="relative">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-aq-dim" />
-            <input
-              className="bg-aq-dark border border-aq-border rounded-lg pl-8 pr-3 py-2 text-sm text-aq-text placeholder-aq-dim/50 focus:outline-none focus:border-aq-blue/60 w-52 transition-colors"
-              placeholder="Search all categories…"
-              value={globalSearch}
-              onChange={(e) => setGlobalSearch(e.target.value)}
-            />
-          </div>
-        )}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => reseedMut.mutate()}
+            disabled={reseedMut.isPending}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-aq-border text-aq-dim hover:text-aq-text hover:border-aq-blue/40 transition-colors disabled:opacity-50"
+            title="Sync all default reference data items from the system seed list"
+          >
+            <RefreshCw size={12} className={reseedMut.isPending ? "animate-spin" : ""} />
+            Sync Defaults
+          </button>
+          {tab === "items" && (
+            <div className="relative">
+              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-aq-dim" />
+              <input
+                className="bg-aq-dark border border-aq-border rounded-lg pl-8 pr-3 py-2 text-sm text-aq-text placeholder-aq-dim/50 focus:outline-none focus:border-aq-blue/60 w-52 transition-colors"
+                placeholder="Search all categories…"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Stats */}

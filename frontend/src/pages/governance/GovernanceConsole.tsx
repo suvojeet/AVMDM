@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams, Link } from "react-router-dom";
-import { governanceApi, enterpriseViewApi } from "../../services/api";
+import { governanceApi, enterpriseViewApi, dynamicSchemaApi } from "../../services/api";
+import type { DynamicSchema } from "../../services/api";
 import {
   Shield, Plus, CheckCircle, AlertTriangle, Edit2,
   ToggleLeft, ToggleRight, X, Trash2, ArrowLeft,
-  ChevronDown, ShieldCheck, MapPin, Tag,
+  ChevronDown, ShieldCheck, MapPin, Tag, Layers,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -57,8 +58,8 @@ function SlideOver({ open, onClose, title, children }: {
 
 // ── Grouped attribute picker ──────────────────────────────────────────────────
 
-function GroupedAttributePicker({ value, onChange, error }: {
-  value: string; onChange: (v: string) => void; error?: boolean;
+function GroupedAttributePicker({ value, onChange, error, entityType }: {
+  value: string; onChange: (v: string) => void; error?: boolean; entityType?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -72,19 +73,47 @@ function GroupedAttributePicker({ value, onChange, error }: {
     return () => document.removeEventListener("mousedown", handle);
   }, []);
 
+  // Fetch dynamic fields for the selected entity type (survivable or matchable)
+  const { data: dynamicSchemas = [] } = useQuery<DynamicSchema[]>({
+    queryKey: ["dynamic-schemas", entityType ?? "PARTY"],
+    queryFn: () => dynamicSchemaApi.getActiveForDomain(entityType ?? "PARTY"),
+    staleTime: 60_000,
+    enabled: !!entityType,
+  });
+
+  const dynamicAttrs: { value: string; label: string }[] = (dynamicSchemas as DynamicSchema[])
+    .filter((s) => s.fields && s.fields.length > 0)
+    .flatMap((s) =>
+      (s.fields ?? [])
+        .filter((f) => f.survivable || f.matchable)
+        .map((f) => ({
+          value: `dynamic.${s.schemaKey}.${f.fieldKey}`,
+          label: `${s.displayName} — ${f.label}`,
+        }))
+    );
+
+  const allGroups = [
+    ...ATTRIBUTE_GROUPS,
+    ...(dynamicAttrs.length > 0 ? [{
+      group: "Dynamic Fields", icon: "layers" as const,
+      attrs: dynamicAttrs,
+    }] : []),
+  ];
+
   const lower = search.toLowerCase();
-  const filtered = ATTRIBUTE_GROUPS
+  const filtered = allGroups
     .map((g) => ({ ...g, attrs: g.attrs.filter((a) => a.label.toLowerCase().includes(lower) || a.value.toLowerCase().includes(lower)) }))
     .filter((g) => g.attrs.length > 0);
 
   function groupIcon(icon: string) {
     if (icon === "shield") return <ShieldCheck size={11} className="text-blue-400 flex-shrink-0" />;
     if (icon === "map")    return <MapPin size={11} className="text-emerald-400 flex-shrink-0" />;
+    if (icon === "layers") return <Layers size={11} className="text-purple-400 flex-shrink-0" />;
     return <Tag size={11} className="text-aq-dim flex-shrink-0" />;
   }
 
   function groupOf(val: string) {
-    return ATTRIBUTE_GROUPS.find((g) => g.attrs.some((a) => a.value === val));
+    return allGroups.find((g) => g.attrs.some((a) => a.value === val));
   }
 
   const group = groupOf(value);
@@ -400,6 +429,7 @@ function SurvivorshipRuleForm({ initial, onSave, onClose, views, defaultViewId }
             value={f.attributeName}
             onChange={(v) => set("attributeName", v)}
             error={!!errors.attributeName}
+            entityType={f.entityType}
           />
           {errors.attributeName && <p className="text-xs text-red-400 mt-1">{errors.attributeName}</p>}
         </Field>

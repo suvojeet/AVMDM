@@ -4,7 +4,7 @@ import {
   Database, ChevronLeft, ChevronRight, Settings, HelpCircle,
   Search, Sparkles, LogOut, Building2, Package, FileText,
   Lock, Network, Brain, ChevronDown, Clock, Star, ScrollText,
-  Edit2, BarChart2, FlaskConical,
+  Edit2, BarChart2, FlaskConical, Layers,
 } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
@@ -65,8 +65,16 @@ const mainNav: NavEntry[] = [
       { to: "/relationships/graph",  icon: BarChart2, label: "Search & Graph"       },
     ],
   },
-  { kind: "item", to: "/governance",         icon: Shield,       label: "Governance" },
-  { kind: "item", to: "/steward",            icon: ClipboardList, label: "Steward Console" },
+  { kind: "item", to: "/governance", icon: Shield, label: "Governance" },
+  {
+    kind: "group",
+    label: "Steward Console",
+    icon: ClipboardList,
+    children: [
+      { to: "/steward",                  icon: ClipboardList, label: "Work Queue"      },
+      { to: "/steward/entity-modeling",  icon: Layers,        label: "Entity Modeling" },
+    ],
+  },
 ];
 
 const aiNav: NavItemDef[] = [

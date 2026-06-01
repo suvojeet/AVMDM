@@ -223,6 +223,50 @@ export const referenceDataApi = {
   update:     (item: unknown) => api.post(`/reference-data`, item).then((r) => r.data),
   delete:     (id: string)    => api.delete(`/reference-data/${id}`).then((r) => r.data),
   reactivate: (id: string)    => api.post(`/reference-data/${id}/reactivate`).then((r) => r.data),
+  reseed:     ()              => api.post(`/reference-data/reseed`).then((r) => r.data),
+};
+
+// ---- Dynamic Entity Modeling API ----
+export type FieldDefinition = {
+  fieldKey: string; label: string; fieldType: string;
+  referenceCategory?: string; required?: boolean;
+  survivable?: boolean; matchable?: boolean;
+  placeholder?: string; helpText?: string; defaultValue?: string;
+  validationRegex?: string; displayOrder?: number; maxLength?: number;
+};
+
+export type DynamicSchema = {
+  id?: string; domain: string; schemaKey: string; displayName: string;
+  description?: string; schemaType: string; allowMultiple?: boolean;
+  isActive?: boolean; displayOrder?: number; colorHint?: string;
+  partyTypes?: string[];          // null/empty = all; otherwise INDIVIDUAL|ORGANIZATION|HOUSEHOLD|EMPLOYEE
+  isReferenceData?: boolean;      // schema is backed by a reference data category
+  referenceDataCategory?: string; // category key when isReferenceData = true
+  fields?: FieldDefinition[];
+  createdBy?: string; updatedBy?: string; createdAt?: string; updatedAt?: string;
+};
+
+export type DynamicAttributeValue = {
+  id?: string; entityId?: string; domain?: string; schemaKey?: string;
+  instanceId?: string; values: Record<string, unknown>;
+  createdBy?: string; updatedBy?: string; createdAt?: string; updatedAt?: string;
+};
+
+export const dynamicSchemaApi = {
+  getAll:              ()                         => api.get(`/entity-modeling/schemas`).then((r) => r.data),
+  getAllForDomain:     (domain: string)            => api.get(`/entity-modeling/schemas/${domain}`).then((r) => r.data),
+  getActiveForDomain:  (domain: string)           => api.get(`/entity-modeling/schemas/${domain}/active`).then((r) => r.data),
+  getFieldDescriptors: (domain: string)           => api.get(`/entity-modeling/schemas/${domain}/field-descriptors`).then((r) => r.data),
+  save:                (schema: DynamicSchema)    => api.post(`/entity-modeling/schemas`, schema).then((r) => r.data),
+  toggle:              (id: string)               => api.post(`/entity-modeling/schemas/${id}/toggle`).then((r) => r.data),
+  delete:              (id: string)               => api.delete(`/entity-modeling/schemas/${id}`).then((r) => r.data),
+};
+
+export const dynamicAttributeApi = {
+  getForEntity:    (domain: string, entityId: string)                          => api.get(`/entity-modeling/attributes/${domain}/${entityId}`).then((r) => r.data),
+  saveSchemaValues: (domain: string, entityId: string, schemaKey: string, values: DynamicAttributeValue[]) =>
+    api.post(`/entity-modeling/attributes/${domain}/${entityId}/${schemaKey}`, values).then((r) => r.data),
+  deleteInstance:  (id: string)                                                => api.delete(`/entity-modeling/attributes/${id}`).then((r) => r.data),
 };
 
 // ---- Address API ----

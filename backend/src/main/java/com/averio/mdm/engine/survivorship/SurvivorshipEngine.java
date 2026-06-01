@@ -32,6 +32,16 @@ public class SurvivorshipEngine {
             "taxId", "dunsNumber", "lei", "ssn", "status"
     );
 
+    // Completeness denominators split by party type so N/A fields don't penalise a record.
+    private static final List<String> INDIVIDUAL_ATTRIBUTES = List.of(
+            "firstName", "lastName", "fullName", "dateOfBirth",
+            "gender", "nationality", "taxId", "ssn", "status"
+    );
+    private static final List<String> ORGANIZATION_ATTRIBUTES = List.of(
+            "organizationName", "legalName", "taxId",
+            "dunsNumber", "lei", "status"
+    );
+
     /**
      * Build a golden record from a set of matching source party records.
      * Applies configured survivorship rules per attribute.
@@ -276,9 +286,26 @@ public class SurvivorshipEngine {
     }
 
     private double calculateCompleteness(Map<String, GoldenRecord.GoldenAttribute> attributes) {
-        long nonNull = attributes.values().stream()
-                .filter(a -> a.getValue() != null).count();
-        return (double) nonNull / Math.max(1, PARTY_ATTRIBUTES.size());
+        // Determine which attribute list applies based on the presence of org vs individual fields
+        boolean isOrg = attributes.containsKey("organizationName") || attributes.containsKey("legalName")
+                     || attributes.containsKey("dunsNumber") || attributes.containsKey("lei");
+        boolean isIndividual = attributes.containsKey("firstName") || attributes.containsKey("lastName")
+                            || attributes.containsKey("dateOfBirth") || attributes.containsKey("ssn");
+
+        List<String> relevantFields;
+        if (isOrg && !isIndividual) {
+            relevantFields = ORGANIZATION_ATTRIBUTES;
+        } else if (isIndividual && !isOrg) {
+            relevantFields = INDIVIDUAL_ATTRIBUTES;
+        } else {
+            // Mixed or unknown — fall back to full list
+            relevantFields = PARTY_ATTRIBUTES;
+        }
+
+        long populated = relevantFields.stream()
+                .filter(f -> attributes.containsKey(f) && attributes.get(f).getValue() != null)
+                .count();
+        return (double) populated / relevantFields.size();
     }
 
     private double calculateAttributeConfidence(List<GoldenRecord.AttributeCandidate> candidates, Object winner) {

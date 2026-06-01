@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import CountrySelect from "../../components/common/CountrySelect";
 import ReferenceSelect from "../../components/common/ReferenceSelect";
+import DynamicAttributesSection from "../../components/common/DynamicAttributesSection";
 import clsx from "clsx";
 import { maskId } from "../../utils/maskUtils";
 
@@ -1847,6 +1848,9 @@ export default function PartyDetail() {
 
           {/* Email Addresses */}
           <EmailSection globalId={globalId!} />
+
+          {/* Dynamic custom attributes defined by steward */}
+          <DynamicAttributesSection domain="PARTY" entityId={globalId!} partyType={party.partyType} />
         </div>
 
         {/* Right column */}

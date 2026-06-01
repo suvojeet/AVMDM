@@ -69,6 +69,12 @@ public class ReferenceDataController {
         return ResponseEntity.ok(Map.of("category", category.toUpperCase(), "code", code, "value", value));
     }
 
+    @PostMapping("/reseed")
+    @Operation(summary = "Force-reseed all default reference data items and flush reference caches")
+    public ResponseEntity<Map<String, Integer>> reseed() {
+        return ResponseEntity.ok(service.reseedAll());
+    }
+
     @PostMapping
     @Operation(summary = "Create or update a reference data item")
     public ResponseEntity<ReferenceDataItem> save(@RequestBody ReferenceDataItem item) {

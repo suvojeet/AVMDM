@@ -227,6 +227,7 @@ export default function StewardConsole() {
         </button>
       </div>
 
+
       {/* Force Match Review Modal */}
       {showForceReview && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">

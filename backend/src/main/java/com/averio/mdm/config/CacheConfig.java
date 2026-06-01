@@ -41,6 +41,7 @@ public class CacheConfig {
             cacheConfigs.put("matchingRules",        defaultConfig.entryTtl(Duration.ofHours(1)));
             cacheConfigs.put("referenceData",        defaultConfig.entryTtl(Duration.ofMinutes(30)));
             cacheConfigs.put("referenceDataActive",  defaultConfig.entryTtl(Duration.ofMinutes(30)));
+            cacheConfigs.put("dynamicSchemas",       defaultConfig.entryTtl(Duration.ofMinutes(10)));
 
             log.info("Redis connected — using RedisCacheManager");
             return RedisCacheManager.builder(connectionFactory)
@@ -52,7 +53,8 @@ public class CacheConfig {
             log.warn("Redis unavailable ({}), falling back to in-memory cache", e.getMessage());
             return new ConcurrentMapCacheManager(
                     "parties", "goldenRecords", "survivorshipRules", "matchingRules",
-                    "governance", "referenceData", "referenceDataActive", "license");
+                    "governance", "referenceData", "referenceDataActive", "license",
+                    "dynamicSchemas");
         }
     }
 }

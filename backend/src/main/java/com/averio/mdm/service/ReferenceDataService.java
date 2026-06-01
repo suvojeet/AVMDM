@@ -8,6 +8,8 @@ import com.averio.mdm.repository.cosmos.ReferenceDataRepository;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.cache.Cache;
+import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.cache.annotation.Caching;
@@ -28,6 +30,7 @@ public class ReferenceDataService {
 
     private final ReferenceDataRepository repo;
     private final ReferenceCategoryRepository catRepo;
+    private final CacheManager cacheManager;
 
     @PostConstruct
     void seedIfAbsent() {
@@ -50,10 +53,39 @@ public class ReferenceDataService {
             if (!missingItems.isEmpty()) {
                 log.info("Seeding {} missing reference data items", missingItems.size());
                 repo.saveAll(missingItems);
+                // Evict caches for affected categories so next request gets fresh data from Cosmos
+                // (needed when Redis persists stale entries across restarts)
+                missingItems.stream()
+                        .map(ReferenceDataItem::getCategory)
+                        .distinct()
+                        .forEach(cat -> {
+                            Cache refCache    = cacheManager.getCache("referenceData");
+                            Cache activeCache = cacheManager.getCache("referenceDataActive");
+                            if (refCache    != null) refCache.evict(cat);
+                            if (activeCache != null) activeCache.evict(cat);
+                        });
             }
         } catch (Exception e) {
             log.warn("Reference data seed skipped — will retry on next request: {}", e.getMessage());
         }
+    }
+
+    /** Force-reseed all default reference data and flush all reference caches. */
+    @Caching(evict = {
+        @CacheEvict(value = "referenceData",       allEntries = true),
+        @CacheEvict(value = "referenceDataActive",  allEntries = true)
+    })
+    public Map<String, Integer> reseedAll() {
+        Set<String> existingItemIds = new HashSet<>();
+        repo.findAll().forEach(i -> existingItemIds.add(i.getId()));
+        List<ReferenceDataItem> missingItems = buildDefaultItems().stream()
+                .filter(i -> !existingItemIds.contains(i.getId()))
+                .collect(Collectors.toList());
+        if (!missingItems.isEmpty()) {
+            log.info("reseedAll: saving {} missing items", missingItems.size());
+            repo.saveAll(missingItems);
+        }
+        return Map.of("seeded", missingItems.size(), "alreadyPresent", existingItemIds.size());
     }
 
     // ── Item API ──────────────────────────────────────────────────────────────

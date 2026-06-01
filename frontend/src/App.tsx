@@ -15,6 +15,7 @@ import ManageRelationships from "./pages/relationship/ManageRelationships";
 import PartyTimeline from "./pages/timeline/PartyTimeline";
 import GovernanceConsole from "./pages/governance/GovernanceConsole";
 import StewardConsole from "./pages/steward/StewardConsole";
+import EntityModeling from "./pages/steward/EntityModeling";
 import AIAssistant from "./pages/ai/AIAssistant";
 import NLPSearchPage from "./pages/ai/NLPSearchPage";
 import StudioAssistant from "./pages/studio/StudioAssistant";
@@ -117,7 +118,8 @@ export default function App() {
 
             {/* ── Platform features — always available ── */}
             <Route path="governance"          element={<GovernanceConsole />} />
-            <Route path="steward"      element={<StewardConsole />} />
+            <Route path="steward"                    element={<StewardConsole />} />
+            <Route path="steward/entity-modeling"   element={<EntityModeling />} />
             <Route path="ai-assistant" element={<AIAssistant />} />
             <Route path="nlp-search"   element={<NLPSearchPage />} />
             <Route path="studio"        element={<StudioAssistant />} />

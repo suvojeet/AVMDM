@@ -9,6 +9,12 @@ backend/src/main/resources/application-*.yml
 *.p12
 *.jks
 
+# ── Sensitive scripts (contain or may contain credentials) ────────────────
+seed_parties.py
+docs/seed_parties.py
+**/seed_*.py
+*.credentials.py
+
 # ── Build outputs ─────────────────────────────────────────────────────────
 target/
 *.class

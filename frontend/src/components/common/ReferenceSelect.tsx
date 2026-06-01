@@ -34,6 +34,9 @@ export default function ReferenceSelect({
   });
 
   const active = items as RefItem[];
+  // If the current value isn't in the loaded options, add it as a selectable option
+  // so existing data stays visible even when reference data is partially seeded.
+  const valueInOptions = !value || active.some((i) => i.value === value);
 
   return (
     <select
@@ -43,6 +46,9 @@ export default function ReferenceSelect({
       className={className}
     >
       <option value="">{isLoading ? "Loading…" : placeholder}</option>
+      {!valueInOptions && (
+        <option key="__current__" value={value}>{value}</option>
+      )}
       {active.map((item) => (
         <option key={item.id} value={item.value}>
           {item.value}

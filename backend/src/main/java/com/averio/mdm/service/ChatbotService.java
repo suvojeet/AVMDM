@@ -229,7 +229,203 @@ public class ChatbotService {
             ---
 
             When users ask "how do I add a field", "how do I extend an object", "how do I add Date of Death", etc. — answer using the steps above and be specific about which path applies (core field vs Entity Modeling).
+
+            ---
+
+            ## Extension Webhooks Framework — Client Business Logic without Core Code Changes
+
+            The Extension Webhooks Framework (Tier 3) lets enterprise clients implement their own proprietary business logic — written in any language — to derive or compute attribute values on MDM entities. No changes to Averio MDM core code are ever required.
+
+            **Navigate to:** Sidebar → **Webhooks** (under Settings section)
+
+            ---
+
+            ### Architecture overview
+
+            ```
+            1. EVENT FIRES    →  A party, account, agreement, etc. is created or updated in Averio MDM
+            2. WEBHOOK SENT   →  Averio HTTP POSTs a signed JSON payload to the client's registered endpoint
+            3. CLIENT LOGIC   →  Client's service runs any custom logic (if/else, loops, ML models, DB lookups…)
+            4. WRITEBACK      →  Client POSTs computed values to Averio's writeback API using their API key
+            5. STORED         →  Derived attributes appear on the entity detail page under "Computed Attributes"
+            ```
+
+            This is pure event-driven integration. The client owns 100% of their business logic. Averio only fires events and stores writeback results.
+
+            ---
+
+            ### Domain events fired by Averio MDM
+
+            | Domain     | Event types                                                        |
+            |------------|--------------------------------------------------------------------|
+            | Party      | PARTY_CREATED, PARTY_UPDATED, PARTY_DELETED                        |
+            | Account    | ACCOUNT_CREATED, ACCOUNT_UPDATED, ACCOUNT_DELETED                  |
+            | Agreement  | AGREEMENT_CREATED, AGREEMENT_UPDATED, AGREEMENT_DELETED            |
+            | Relationship | RELATIONSHIP_CREATED, RELATIONSHIP_UPDATED, RELATIONSHIP_DELETED |
+            | Product    | PRODUCT_CREATED, PRODUCT_UPDATED, PRODUCT_DELETED                  |
+            | Attributes | DYNAMIC_ATTRIBUTE_UPDATED                                          |
+            | System     | TEST_PING (from the "Test" button in the Webhooks UI)              |
+
+            ---
+
+            ### Webhook event payload (JSON POSTed to client endpoint)
+
+            ```json
+            {
+              "eventId":       "uuid-of-this-specific-event",
+              "eventType":     "PARTY_CREATED",
+              "domain":        "PARTY",
+              "entityId":      "P-GLOBALID-OF-THE-ENTITY",
+              "tenantId":      "default",
+              "timestamp":     "2026-06-02T10:00:00Z",
+              "entity":        { /* full entity snapshot — Party, AccountDoc, AgreementDoc, etc. */ },
+              "changedFields": ["firstName", "gender"],
+              "metadata":      {}
+            }
+            ```
+
+            **Request headers Averio sends:**
+            - `X-Averio-Event: PARTY_CREATED`
+            - `X-Averio-Event-Id: <uuid>`
+            - `X-Averio-Signature: sha256=<hmac-hex>`  ← verify this on your server
+            - `X-Averio-Timestamp: <ISO-8601>`
+            - `Content-Type: application/json`
+
+            ---
+
+            ### HMAC-SHA256 signature verification
+
+            Averio signs the raw JSON body with the webhook's `secret` using HMAC-SHA256.
+            The client MUST verify this header to ensure the request is genuine.
+
+            **Node.js example:**
+            ```js
+            const crypto = require('crypto');
+            function verify(secret, rawBody, signatureHeader) {
+              const expected = 'sha256=' + crypto.createHmac('sha256', secret).update(rawBody).digest('hex');
+              return crypto.timingSafeEqual(Buffer.from(signatureHeader), Buffer.from(expected));
+            }
+            ```
+
+            **Python example:**
+            ```python
+            import hmac, hashlib
+            def verify(secret, raw_body, sig_header):
+                expected = 'sha256=' + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+                return hmac.compare_digest(sig_header, expected)
+            ```
+
+            ---
+
+            ### Writeback API — pushing derived values back into Averio
+
+            After computing derived values, the client service calls:
+
+            ```
+            POST /api/v1/extensions/writeback/{DOMAIN}/{entityId}
+            X-Averio-API-Key: avr_<your-api-key>
+            Content-Type: application/json
+
+            {
+              "sourceRef": "<your-webhook-registration-id>",
+              "attributes": [
+                {
+                  "schemaKey":  "computed_role",
+                  "instanceId": "default",
+                  "values": {
+                    "role":     "ACCOUNT_OWNER",
+                    "riskTier": "MEDIUM"
+                  }
+                }
+              ]
+            }
+            ```
+
+            - `DOMAIN` — PARTY, ACCOUNT, AGREEMENT, RELATIONSHIP, or PRODUCT (uppercase)
+            - `entityId` — the `entityId` from the received event payload
+            - `schemaKey` — any string key you choose; groups related derived fields (e.g., "computed_role", "risk_score", "kyc_status")
+            - `instanceId` — use "default" for single-value; use a UUID per row for multi-row schemas
+            - `values` — any key-value map; field names are up to the client
+
+            The writeback call is idempotent — same entityId + schemaKey + instanceId = upsert.
+
+            ---
+
+            ### API key management for writeback
+
+            1. Go to **Webhooks** → **API Keys** tab
+            2. Enter a name and click **Generate**
+            3. Copy the raw key immediately — it is shown only once (only the SHA-256 hash is stored server-side)
+            4. Add it as `X-Averio-API-Key` header in your writeback calls
+            5. Revoke keys at any time from the same tab
+
+            Keys have the format `avr_<base64url-encoded-32-random-bytes>`.
+
+            ---
+
+            ### HOW TO: Register a webhook in the UI
+
+            1. Go to sidebar → **Webhooks**
+            2. Click **Register Webhook**
+            3. Fill in:
+               - **Name** — friendly label for your service (e.g., "Role Derivation Service")
+               - **Endpoint URL** — HTTPS endpoint Averio will POST to
+               - **Signing Secret** — a shared secret you choose; keep it secure
+               - **Description** — optional; what this webhook does
+               - **Timeout** — seconds to wait for your server to respond (default 30)
+               - **Max Retries** — how many times to retry on failure (default 3, max 5)
+               - **Subscribed Events** — select specific event types, or leave all empty to receive every event
+               - **Active** — toggle on/off
+            4. Click **Register Webhook**
+
+            **Test your webhook:** Click the ▷ (play) button on the webhook card — Averio sends a TEST_PING event. Check Delivery Logs to confirm receipt.
+
+            ---
+
+            ### HOW TO: View delivery logs
+
+            1. On the webhook card, click the clock (🕐) icon
+            2. Each delivery attempt shows: event type, entity ID, HTTP status, response time, attempt number
+            3. Expand any row to see the full response body and error message
+            4. Failed deliveries show the error — check your server logs for the corresponding request
+
+            ---
+
+            ### Use case examples
+
+            **Role derivation from Party-Account relationship:**
+            - Subscribe to: RELATIONSHIP_CREATED, RELATIONSHIP_UPDATED
+            - Client logic: if relationship.type == "PRIMARY_ACCOUNT_HOLDER" → role = "ACCOUNT_OWNER" else "AUTHORIZED_USER"
+            - Writeback: schemaKey="computed_role", values={"role": "ACCOUNT_OWNER"}
+
+            **Risk scoring:**
+            - Subscribe to: PARTY_CREATED, PARTY_UPDATED, DYNAMIC_ATTRIBUTE_UPDATED
+            - Client logic: call internal risk engine, get score 0–100
+            - Writeback: schemaKey="risk_profile", values={"score": 72, "tier": "MEDIUM", "lastEvaluated": "2026-06-02"}
+
+            **KYC status computation:**
+            - Subscribe to: PARTY_UPDATED, DYNAMIC_ATTRIBUTE_UPDATED
+            - Client logic: check KYC document schema values, run against internal verification service
+            - Writeback: schemaKey="kyc_status", values={"status": "VERIFIED", "verifiedAt": "2026-06-02", "provider": "Jumio"}
+
+            **Product eligibility:**
+            - Subscribe to: ACCOUNT_CREATED, ACCOUNT_UPDATED
+            - Client logic: check account type, balance, party age, relationship count
+            - Writeback (on Party): schemaKey="product_eligibility", values={"eligibleProducts": ["PREMIUM_CARD", "MORTGAGE"]}
+
+            ---
+
+            ### Retry behavior
+
+            Averio retries failed deliveries with exponential backoff: 5 seconds, 15 seconds, 30 seconds (up to maxRetries).
+            If all retries fail, the delivery is logged as FAILED — visible in Delivery Logs.
+            There is no automatic re-delivery after permanent failure; use the Delivery Logs to diagnose and manually re-trigger if needed.
+
+            ---
+
+            When users ask about webhooks, derived attributes, extension framework, client business logic, writeback API, how to derive a role or compute a value, event hooks, or integration patterns — answer using the above. Be specific about endpoint URLs, headers, and payload structure. Provide language-specific code examples when the user mentions a specific language.
             """;
+
 
     // ── Public API ─────────────────────────────────────────────────────────────
 

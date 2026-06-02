@@ -1,6 +1,7 @@
 package com.averio.mdm.service;
 
 import com.averio.mdm.domain.entity.Party;
+import com.averio.mdm.domain.event.AverioMdmEvent;
 import com.averio.mdm.domain.steward.StewardTask;
 import com.averio.mdm.domain.timeline.TimelineEvent;
 import com.averio.mdm.engine.matching.MatchingEngine;
@@ -13,10 +14,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.*;
 import java.util.concurrent.ThreadLocalRandom;
@@ -34,6 +37,7 @@ public class PartyService {
     private final TimelineService timelineService;
     private final SearchService searchService;
     private final TransactionLogService transactionLogService;
+    private final ApplicationEventPublisher eventPublisher;
 
     /** Optional — injected with required=false to avoid circular dep with StewardService. */
     @Autowired(required = false)
@@ -90,6 +94,7 @@ public class PartyService {
             safeRecordEvent(buildEvent(saved, "INGEST_CLIENT_GOLDEN_ID", requestedBy));
             transactionLogService.logSuccess("PARTY", saved.getGlobalId(), "CREATE",
                     requestedBy, System.currentTimeMillis() - start, null, saved);
+            publishPartyEvent(AverioMdmEvent.PARTY_CREATED, saved);
             log.info("Party ingested with client-provided golden ID {}", clientGoldenId);
             return saved;
         }
@@ -110,6 +115,7 @@ public class PartyService {
                 safeRecordEvent(buildEvent(saved, "INGEST_AUTO_LINKED", requestedBy));
                 transactionLogService.logSuccess("PARTY", saved.getGlobalId(), "CREATE",
                         requestedBy, System.currentTimeMillis() - start, null, saved);
+                publishPartyEvent(AverioMdmEvent.PARTY_CREATED, saved);
                 log.info("Party auto-linked to golden record {} (score={})", goldenId, matchResult.getBestMatchScore());
                 return saved;
             }
@@ -132,6 +138,7 @@ public class PartyService {
                 safeRecordEvent(buildEvent(saved, "INGEST_PENDING_REVIEW", requestedBy));
                 transactionLogService.logSuccess("PARTY", saved.getGlobalId(), "CREATE",
                         requestedBy, System.currentTimeMillis() - start, null, saved);
+                publishPartyEvent(AverioMdmEvent.PARTY_CREATED, saved);
                 log.info("Party pending steward review, score={}, provisionalGolden={}",
                         matchResult.getBestMatchScore(), provisionalGoldenId);
                 return saved;
@@ -148,6 +155,7 @@ public class PartyService {
                 safeRecordEvent(buildEvent(saved, "INGEST_NEW_ENTITY", requestedBy));
                 transactionLogService.logSuccess("PARTY", saved.getGlobalId(), "CREATE",
                         requestedBy, System.currentTimeMillis() - start, null, saved);
+                publishPartyEvent(AverioMdmEvent.PARTY_CREATED, saved);
                 log.info("New golden record created: {}", newGoldenId);
                 return saved;
             }
@@ -190,6 +198,7 @@ public class PartyService {
             catch (Exception ex) { log.warn("Timeline update event non-fatal: {}", ex.getMessage()); }
             transactionLogService.logSuccess("PARTY", globalId, "UPDATE",
                     updatedBy, System.currentTimeMillis() - start, oldValues, saved);
+            publishPartyEvent(AverioMdmEvent.PARTY_UPDATED, saved);
             return saved;
         } catch (OptimisticLockingFailureException ex) {
             throw new RuntimeException("CONCURRENT_MODIFICATION: Party " + globalId +
@@ -638,5 +647,23 @@ public class PartyService {
     private String generateGoldenId() {
         // 10-digit numeric Golden ID, shared across all source records that resolve to the same entity
         return String.format("%010d", ThreadLocalRandom.current().nextLong(0, 10_000_000_000L));
+    }
+
+    // ── Domain event publishing ───────────────────────────────────────────────
+
+    private void publishPartyEvent(String eventType, Party party) {
+        try {
+            eventPublisher.publishEvent(AverioMdmEvent.builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .eventType(eventType)
+                    .domain("PARTY")
+                    .entityId(party.getGlobalId())
+                    .tenantId("default")
+                    .entity(party)
+                    .timestamp(Instant.now())
+                    .build());
+        } catch (Exception e) {
+            log.warn("Failed to publish {} event for party {}: {}", eventType, party.getGlobalId(), e.getMessage());
+        }
     }
 }

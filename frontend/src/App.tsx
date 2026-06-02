@@ -35,6 +35,8 @@ import MatchingDocs from "./pages/docs/MatchingDocs";
 import TestLabDocs from "./pages/docs/TestLabDocs";
 import TestLab from "./pages/testlab/TestLab";
 import HelpDocs from "./pages/help/HelpDocs";
+import Webhooks from "./pages/settings/Webhooks";
+import ExtensionDocs from "./pages/docs/ExtensionDocs";
 
 // ── License gate wrapper ───────────────────────────────────────────────────
 
@@ -132,6 +134,8 @@ export default function App() {
             <Route path="docs/test-lab"    element={<TestLabDocs />} />
             <Route path="test-lab"         element={<TestLab />} />
             <Route path="help"             element={<HelpDocs />} />
+            <Route path="settings/webhooks" element={<Webhooks />} />
+            <Route path="docs/extensions"  element={<ExtensionDocs />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

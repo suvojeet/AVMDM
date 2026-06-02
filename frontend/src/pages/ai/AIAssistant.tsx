@@ -17,13 +17,19 @@ const SUGGESTIONS = [
   "Explain the difference between deterministic and probabilistic matching",
   "Find parties with similar names to John Smith",
   "What compliance frameworks are we monitoring?",
+  "How do I set up a webhook to receive events when a party is created or updated?",
+  "Show me the writeback API structure for pushing derived attribute values back",
+  "What does the PARTY_CREATED event payload look like?",
+  "How do I verify the HMAC signature on incoming webhook events?",
+  "Walk me through role derivation using the extension webhook framework",
+  "How do I generate an API key for the writeback endpoint?",
 ];
 
 export default function AIAssistant() {
   const { hasAiAgent } = useLicense();
   const [messages, setMessages] = useState<Message[]>([{
     role: "assistant",
-    content: "Hello! I'm **AverioAI**, your intelligent MDM assistant. I can help you:\n\n- 🔍 Search and analyze master data\n- 📊 Explain data quality scores and golden records\n- ⚙️ Guide you through governance rules and policies\n- 🤝 Assist with entity resolution and steward decisions\n\nWhat would you like to know?",
+    content: "Hello! I'm **AverioAI**, your intelligent MDM assistant. I can help you:\n\n- 🔍 Search and analyze master data\n- 📊 Explain data quality scores and golden records\n- ⚙️ Guide you through governance rules and policies\n- 🤝 Assist with entity resolution and steward decisions\n- 🔗 Set up extension webhooks and the writeback API for your own business logic\n- 🧩 Explain the Extension Framework — derive roles, scores, and computed attributes from your own service\n\nWhat would you like to know?",
     timestamp: new Date(),
   }]);
   const [input, setInput] = useState("");

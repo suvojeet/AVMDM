@@ -4,7 +4,7 @@ import {
   Database, ChevronLeft, ChevronRight, Settings, HelpCircle,
   Search, Sparkles, LogOut, Building2, Package, FileText,
   Lock, Network, Brain, ChevronDown, Clock, Star, ScrollText,
-  Edit2, BarChart2, FlaskConical, Layers,
+  Edit2, BarChart2, FlaskConical, Layers, Zap,
 } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
@@ -85,10 +85,11 @@ const aiNav: NavItemDef[] = [
 ];
 
 const secondaryNav: NavItemDef[] = [
-  { kind: "item", to: "/audit-logs",     icon: ScrollText, label: "Audit Logs" },
-  { kind: "item", to: "/reference-data", icon: Database,   label: "Reference Data" },
-  { kind: "item", to: "/settings",       icon: Settings,   label: "Settings" },
-  { kind: "item", to: "/help",           icon: HelpCircle, label: "Help & Docs" },
+  { kind: "item", to: "/audit-logs",          icon: ScrollText, label: "Audit Logs" },
+  { kind: "item", to: "/reference-data",      icon: Database,   label: "Reference Data" },
+  { kind: "item", to: "/settings/webhooks",   icon: Zap,        label: "Webhooks" },
+  { kind: "item", to: "/settings",            icon: Settings,   label: "Settings" },
+  { kind: "item", to: "/help",                icon: HelpCircle, label: "Help & Docs" },
 ];
 
 // ── Tier badge config ──────────────────────────────────────────────────────────

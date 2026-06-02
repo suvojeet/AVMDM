@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import {
   HelpCircle, BookOpen, Star, Clock, GitMerge, FlaskConical,
-  ChevronRight, ExternalLink, Lightbulb, Zap, Shield, Brain,
+  ChevronRight, ExternalLink, Lightbulb, Zap, Shield, Brain, Webhook,
 } from "lucide-react";
 
 // ── Doc card ──────────────────────────────────────────────────────────────────
@@ -125,6 +125,23 @@ export default function HelpDocs() {
         </div>
       </div>
 
+      {/* Developer guides */}
+      <div>
+        <p className="text-[10px] font-semibold text-aq-dim uppercase tracking-widest mb-3">
+          Developer Guides
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <DocCard
+            to="/docs/extensions"
+            icon={Webhook}
+            title="Extension Framework"
+            description="Subscribe to domain events, run custom business logic in any language, and write derived attributes back via the secure writeback API."
+            badge="Ext"
+            color="bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"
+          />
+        </div>
+      </div>
+
       {/* Quick links */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
@@ -138,6 +155,7 @@ export default function HelpDocs() {
             <QuickLink to="/ml-matching"    icon={Brain}        label="ML Matching — model insights" />
             <QuickLink to="/studio"         icon={Lightbulb}    label="Studio Guide — interactive tour" />
             <QuickLink to="/test-lab"       icon={FlaskConical} label="Test Laboratory — run tests" />
+            <QuickLink to="/docs/extensions" icon={Webhook}     label="Extension Framework — developer reference" />
           </div>
         </div>
 

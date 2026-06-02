@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import {
   Sparkles, Send, Loader2, BookOpen, Zap, Shield, Database,
   GitFork, Users, Bot, ChevronRight, Star, Copy, Check,
-  PlayCircle, Lightbulb, HelpCircle
+  PlayCircle, Lightbulb, HelpCircle, Webhook, Key, Globe, RefreshCw,
 } from "lucide-react";
 import clsx from "clsx";
 import AverioLogo from "../../components/common/AverioLogo";
@@ -172,6 +172,184 @@ Navigate to any party → click the timeline icon, or visit the **Timeline & Jou
       { icon: GitFork, color: "from-cyan-500 to-blue-600", title: "View Timeline", description: "See the journey of a golden record", action: "Open", href: "/parties/timeline" },
     ],
   },
+
+  webhooks: {
+    answer: `The **Extension Webhooks Framework** lets your team implement proprietary business logic — in any programming language — to compute derived attribute values on any MDM entity, without touching Averio's core code.
+
+**How it works (4 steps):**
+1. **Register a webhook endpoint** — your HTTPS URL that receives event payloads
+2. **Averio fires domain events** — every create/update on Party, Account, Agreement, Relationship, Product triggers a signed HTTP POST
+3. **Your service runs its logic** — any if/else, loops, ML models, database lookups, API calls — completely owned by your team
+4. **Write derived values back** — call the Averio writeback API with your computed results
+
+**Go to:** Sidebar → **Webhooks** → Register Webhook
+
+**Classic use cases:**
+- Role derivation: "if party has PRIMARY_ACCOUNT_HOLDER relationship → role = ACCOUNT_OWNER"
+- Risk scoring: send party data to your risk engine, write score back
+- KYC status: check external verification provider, write verified/unverified status back
+- Product eligibility: compute which products the account qualifies for
+
+The derived values appear on the entity detail page under **Computed Attributes**, sourced from your service.`,
+    cards: [
+      { icon: Webhook,  color: "from-violet-500 to-purple-700", title: "Register Webhook",    description: "Set up your first extension endpoint", action: "Open",   href: "/settings/webhooks" },
+      { icon: Key,      color: "from-amber-500 to-orange-600",  title: "Manage API Keys",     description: "Generate writeback authentication keys", action: "Manage", href: "/settings/webhooks" },
+    ],
+  },
+
+  events: {
+    answer: `Averio MDM fires **domain events** across all entity types whenever data changes. Your webhook receives these as signed HTTP POST requests.
+
+**All event types:**
+
+| Domain | Events |
+|--------|--------|
+| Party | \`PARTY_CREATED\` \`PARTY_UPDATED\` \`PARTY_DELETED\` |
+| Account | \`ACCOUNT_CREATED\` \`ACCOUNT_UPDATED\` \`ACCOUNT_DELETED\` |
+| Agreement | \`AGREEMENT_CREATED\` \`AGREEMENT_UPDATED\` \`AGREEMENT_DELETED\` |
+| Relationship | \`RELATIONSHIP_CREATED\` \`RELATIONSHIP_UPDATED\` \`RELATIONSHIP_DELETED\` |
+| Product | \`PRODUCT_CREATED\` \`PRODUCT_UPDATED\` \`PRODUCT_DELETED\` |
+| Attributes | \`DYNAMIC_ATTRIBUTE_UPDATED\` |
+| System | \`TEST_PING\` (manual test from UI) |
+
+**Event payload structure:**
+\`\`\`json
+{
+  "eventId":   "uuid",
+  "eventType": "PARTY_CREATED",
+  "domain":    "PARTY",
+  "entityId":  "P-GLOBALID",
+  "tenantId":  "default",
+  "timestamp": "2026-06-02T10:00:00Z",
+  "entity":    { /* full entity snapshot */ },
+  "changedFields": ["firstName"]
+}
+\`\`\`
+
+**Security headers Averio sends:**
+- \`X-Averio-Signature: sha256=<hmac>\` — verify this with your webhook secret
+- \`X-Averio-Event: PARTY_CREATED\`
+- \`X-Averio-Event-Id: <uuid>\`
+
+You can subscribe to specific events or leave all empty to receive every event.`,
+    cards: [
+      { icon: Zap, color: "from-blue-500 to-violet-600", title: "View Event Subscriptions", description: "Configure which events trigger your webhook", action: "Configure", href: "/settings/webhooks" },
+    ],
+  },
+
+  writeback: {
+    answer: `The **Writeback API** is the endpoint your extension service calls to push computed values back into Averio MDM.
+
+**Endpoint:**
+\`\`\`
+POST /api/v1/extensions/writeback/{DOMAIN}/{entityId}
+X-Averio-API-Key: avr_...
+Content-Type: application/json
+\`\`\`
+
+**Request body:**
+\`\`\`json
+{
+  "sourceRef": "your-webhook-registration-id",
+  "attributes": [
+    {
+      "schemaKey":  "computed_role",
+      "instanceId": "default",
+      "values": {
+        "role":     "ACCOUNT_OWNER",
+        "riskTier": "MEDIUM"
+      }
+    }
+  ]
+}
+\`\`\`
+
+**Key rules:**
+- \`DOMAIN\` — PARTY, ACCOUNT, AGREEMENT, RELATIONSHIP, PRODUCT (uppercase)
+- \`entityId\` — the \`entityId\` from the event payload you received
+- \`schemaKey\` — you choose this; groups related derived fields
+- \`instanceId\` — use \`"default"\` for a single value; UUID for each row in a list
+- The call is **idempotent** — same entityId + schemaKey + instanceId always upserts
+
+**Authentication:** Generate an API key from **Webhooks → API Keys tab**. The raw key is shown only once — store it in your service's environment variables.
+
+Results are visible on the entity page under **Computed Attributes**, tagged with your webhook's name as the source.`,
+    cards: [
+      { icon: Key,      color: "from-amber-500 to-orange-600",  title: "Generate API Key",  description: "Get a key to authenticate writeback calls", action: "Generate", href: "/settings/webhooks" },
+      { icon: Globe,    color: "from-teal-500 to-cyan-600",     title: "View Webhooks",     description: "Manage registrations and delivery logs",    action: "Open",     href: "/settings/webhooks" },
+    ],
+  },
+
+  integration: {
+    answer: `Here is a **complete integration walkthrough** for the Averio MDM Extension Framework:
+
+---
+
+**Step 1 — Register your webhook**
+1. Go to Sidebar → **Webhooks**
+2. Click **Register Webhook**
+3. Enter your endpoint URL, a signing secret, and select which events to receive
+4. Click **Register Webhook**
+5. Click the ▷ **Test** button — confirm your server receives the TEST_PING
+
+---
+
+**Step 2 — Generate an API key**
+1. Click the **API Keys** tab
+2. Enter a name and click **Generate**
+3. Copy the raw key immediately — it is shown only once
+4. Store it as an environment variable in your service (e.g., \`AVERIO_API_KEY\`)
+
+---
+
+**Step 3 — Build your endpoint (Node.js example)**
+\`\`\`js
+const express = require('express');
+const crypto  = require('crypto');
+const axios   = require('axios');
+const app     = express();
+app.use(express.json({ verify: (req, res, buf) => { req.rawBody = buf; } }));
+
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+const AVERIO_API_KEY = process.env.AVERIO_API_KEY;
+const AVERIO_BASE    = 'https://your-averio-host/api/v1';
+
+app.post('/averio/hooks', async (req, res) => {
+  // 1. Verify signature
+  const sig = req.headers['x-averio-signature'];
+  const expected = 'sha256=' + crypto.createHmac('sha256', WEBHOOK_SECRET)
+                                     .update(req.rawBody).digest('hex');
+  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected)))
+    return res.status(401).json({ error: 'Invalid signature' });
+
+  res.status(202).send(); // acknowledge immediately
+
+  // 2. Process asynchronously
+  const { eventType, domain, entityId, entity } = req.body;
+  if (eventType === 'RELATIONSHIP_CREATED') {
+    const role = entity.relationshipType === 'PRIMARY_ACCOUNT_HOLDER'
+      ? 'ACCOUNT_OWNER' : 'AUTHORIZED_USER';
+
+    // 3. Write back derived value
+    await axios.post(\`\${AVERIO_BASE}/extensions/writeback/\${domain}/\${entityId}\`, {
+      sourceRef: 'your-webhook-id',
+      attributes: [{ schemaKey: 'computed_role', instanceId: 'default', values: { role } }]
+    }, { headers: { 'X-Averio-API-Key': AVERIO_API_KEY } });
+  }
+});
+
+app.listen(3000);
+\`\`\`
+
+---
+
+**Step 4 — Monitor deliveries**
+Go to Webhooks → click the clock icon on your webhook → view delivery logs with HTTP status, response time, and error details per event.`,
+    cards: [
+      { icon: Webhook,   color: "from-violet-500 to-purple-700", title: "Webhooks Console",    description: "Manage registrations and view logs",       action: "Open",  href: "/settings/webhooks" },
+      { icon: RefreshCw, color: "from-teal-500 to-cyan-600",     title: "Extension Docs",      description: "Full reference guide for the framework",   action: "Read",  href: "/docs/extensions" },
+    ],
+  },
 };
 
 function getKBResponse(query: string) {
@@ -179,20 +357,30 @@ function getKBResponse(query: string) {
   if (lower.includes("golden") || lower.includes("survivorship") || lower.includes("survive")) return STUDIO_KB.golden;
   if (lower.includes("match") || lower.includes("duplicate") || lower.includes("entity resolution") || lower.includes("probabilistic")) return STUDIO_KB.matching;
   if (lower.includes("steward") || lower.includes("queue") || lower.includes("review") || lower.includes("task")) return STUDIO_KB.steward;
-  if (lower.includes("api") || lower.includes("endpoint") || lower.includes("rest") || lower.includes("swagger") || lower.includes("integrate")) return STUDIO_KB.api;
   if (lower.includes("timeline") || lower.includes("audit") || lower.includes("history") || lower.includes("restore") || lower.includes("point-in-time")) return STUDIO_KB.timeline;
+  if (lower.includes("writeback") || lower.includes("write back") || lower.includes("write-back") || lower.includes("derived") || lower.includes("computed")) return STUDIO_KB.writeback;
+  if (lower.includes("event") || lower.includes("payload") || lower.includes("party_created") || lower.includes("fired") || lower.includes("fires")) return STUDIO_KB.events;
+  if (lower.includes("integrat") || lower.includes("walkthrough") || lower.includes("step by step") || lower.includes("code example") || lower.includes("node") || lower.includes("python")) return STUDIO_KB.integration;
+  if (lower.includes("webhook") || lower.includes("hook") || lower.includes("extension") || lower.includes("derive") || lower.includes("role") || lower.includes("proprietary") || lower.includes("business logic")) return STUDIO_KB.webhooks;
+  if (lower.includes("api key") || lower.includes("apikey") || lower.includes("api-key") || lower.includes("authentication") || lower.includes("avr_")) return STUDIO_KB.writeback;
+  if (lower.includes("api") || lower.includes("endpoint") || lower.includes("rest") || lower.includes("swagger") || lower.includes("integrate")) return STUDIO_KB.api;
   return STUDIO_KB.default;
 }
 
 // ── Suggested questions ────────────────────────────────────────────────────────
 
 const QUICK_TOPICS = [
-  { icon: Database,     label: "What is a Golden Record?",        query: "What is a golden record and how does survivorship work?" },
-  { icon: Bot,          label: "How does matching work?",         query: "How does the matching engine detect duplicates?" },
-  { icon: Shield,       label: "Steward workflow",                query: "How do I work with the steward console?" },
-  { icon: Zap,          label: "REST API guide",                  query: "Show me the key API endpoints and how to integrate" },
-  { icon: BookOpen,     label: "Timeline & audit trail",          query: "How does the audit timeline and point-in-time restore work?" },
-  { icon: HelpCircle,   label: "Getting started",                 query: "Give me an overview of Averio MDM features" },
+  { icon: Database,     label: "What is a Golden Record?",         query: "What is a golden record and how does survivorship work?" },
+  { icon: Bot,          label: "How does matching work?",          query: "How does the matching engine detect duplicates?" },
+  { icon: Shield,       label: "Steward workflow",                 query: "How do I work with the steward console?" },
+  { icon: Zap,          label: "REST API guide",                   query: "Show me the key API endpoints and how to integrate" },
+  { icon: BookOpen,     label: "Timeline & audit trail",           query: "How does the audit timeline and point-in-time restore work?" },
+  { icon: Webhook,      label: "Extension webhooks",               query: "How does the extension webhook framework work and what can I build with it?" },
+  { icon: Globe,        label: "What events are fired?",           query: "What domain events does Averio MDM fire and what does the payload look like?" },
+  { icon: RefreshCw,    label: "Writeback API",                    query: "How do I write derived attribute values back to Averio after processing a webhook event?" },
+  { icon: Key,          label: "API key setup",                    query: "How do I generate an API key for the writeback endpoint?" },
+  { icon: Lightbulb,    label: "Full integration walkthrough",     query: "Show me a complete step-by-step integration guide with code examples for the extension framework" },
+  { icon: HelpCircle,   label: "Getting started",                  query: "Give me an overview of Averio MDM features" },
 ];
 
 // ── Guide card component ───────────────────────────────────────────────────────

@@ -1,23 +1,25 @@
 package com.averio.mdm.service;
 
 import com.averio.mdm.domain.cosmos.AccountDoc;
+import com.averio.mdm.domain.event.AverioMdmEvent;
 import com.averio.mdm.repository.cosmos.AccountDocRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
+
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AccountService {
 
-    private final AccountDocRepository repo;
+    private final AccountDocRepository  repo;
+    private final ApplicationEventPublisher eventPublisher;
 
     public List<AccountDoc> getAll() {
         List<AccountDoc> all = new ArrayList<>();
@@ -56,7 +58,9 @@ public class AccountService {
         account.setUpdatedAt(LocalDateTime.now());
         account.setIsGolden(true);
         account.setVersion(1L);
-        return repo.save(account);
+        AccountDoc saved = repo.save(account);
+        publishEvent(AverioMdmEvent.ACCOUNT_CREATED, saved.getGlobalAccountId(), saved);
+        return saved;
     }
 
     public AccountDoc update(String id, AccountDoc updates) {
@@ -69,10 +73,24 @@ public class AccountService {
         if (updates.getAttributes() != null) existing.setAttributes(updates.getAttributes());
         existing.setUpdatedAt(LocalDateTime.now());
         existing.setVersion(existing.getVersion() == null ? 1L : existing.getVersion() + 1);
-        return repo.save(existing);
+        AccountDoc saved = repo.save(existing);
+        publishEvent(AverioMdmEvent.ACCOUNT_UPDATED, saved.getGlobalAccountId(), saved);
+        return saved;
     }
 
     public void delete(String id) {
         repo.deleteById(id);
+    }
+
+    private void publishEvent(String type, String entityId, Object entity) {
+        try {
+            eventPublisher.publishEvent(AverioMdmEvent.builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .eventType(type).domain("ACCOUNT")
+                    .entityId(entityId).tenantId("default")
+                    .entity(entity).timestamp(Instant.now()).build());
+        } catch (Exception e) {
+            log.warn("Failed to publish {} event for account {}: {}", type, entityId, e.getMessage());
+        }
     }
 }

@@ -385,4 +385,90 @@ export const demoApi = {
   seedParties: () => api.post(`/demo/seed-parties`).then((r) => r.data),
 };
 
+// ---- Webhook Extension API ----
+
+export type WebhookRegistration = {
+  id?: string;
+  tenantId?: string;
+  name: string;
+  url: string;
+  secret?: string;
+  events: string[];
+  isActive?: boolean;
+  timeoutSeconds?: number;
+  maxRetries?: number;
+  description?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type WebhookDeliveryLog = {
+  id?: string;
+  webhookId?: string;
+  eventId?: string;
+  eventType?: string;
+  entityId?: string;
+  domain?: string;
+  attemptNumber?: number;
+  status?: string;
+  httpStatus?: number;
+  responseBody?: string;
+  errorMessage?: string;
+  durationMs?: number;
+  attemptedAt?: string;
+};
+
+export type TenantApiKey = {
+  id?: string;
+  tenantId?: string;
+  name?: string;
+  keyPrefix?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  lastUsedAt?: string;
+};
+
+export type DerivedAttributeValue = {
+  id?: string;
+  entityId?: string;
+  domain?: string;
+  schemaKey?: string;
+  instanceId?: string;
+  values?: Record<string, unknown>;
+  source?: string;
+  sourceRef?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export const ALL_WEBHOOK_EVENTS = [
+  { group: "Party",        events: ["PARTY_CREATED",        "PARTY_UPDATED",        "PARTY_DELETED"]        },
+  { group: "Account",      events: ["ACCOUNT_CREATED",      "ACCOUNT_UPDATED",      "ACCOUNT_DELETED"]      },
+  { group: "Agreement",    events: ["AGREEMENT_CREATED",    "AGREEMENT_UPDATED",    "AGREEMENT_DELETED"]    },
+  { group: "Relationship", events: ["RELATIONSHIP_CREATED", "RELATIONSHIP_UPDATED", "RELATIONSHIP_DELETED"] },
+  { group: "Product",      events: ["PRODUCT_CREATED",      "PRODUCT_UPDATED",      "PRODUCT_DELETED"]      },
+  { group: "Attributes",   events: ["DYNAMIC_ATTRIBUTE_UPDATED"]                                            },
+];
+
+export const webhookApi = {
+  list:     ()                                 => api.get(`/extensions/webhooks`).then((r) => r.data as WebhookRegistration[]),
+  create:   (reg: WebhookRegistration)         => api.post(`/extensions/webhooks`, reg).then((r) => r.data as WebhookRegistration),
+  update:   (id: string, reg: WebhookRegistration) => api.put(`/extensions/webhooks/${id}`, reg).then((r) => r.data as WebhookRegistration),
+  delete:   (id: string)                       => api.delete(`/extensions/webhooks/${id}`),
+  toggle:   (id: string)                       => api.post(`/extensions/webhooks/${id}/toggle`).then((r) => r.data as WebhookRegistration),
+  test:     (id: string)                       => api.post(`/extensions/webhooks/${id}/test`),
+  getLogs:  (id: string)                       => api.get(`/extensions/webhooks/${id}/logs`).then((r) => r.data as WebhookDeliveryLog[]),
+};
+
+export const apiKeyApi = {
+  list:     ()                => api.get(`/extensions/api-keys`).then((r) => r.data as TenantApiKey[]),
+  generate: (name: string)    => api.post(`/extensions/api-keys`, { name }).then((r) => r.data as { apiKey: string; meta: TenantApiKey }),
+  revoke:   (id: string)      => api.delete(`/extensions/api-keys/${id}`),
+};
+
+export const derivedAttributeApi = {
+  getForEntity: (domain: string, entityId: string) =>
+    api.get(`/extensions/derived/${domain}/${entityId}`).then((r) => r.data as DerivedAttributeValue[]),
+};
+
 export default api;

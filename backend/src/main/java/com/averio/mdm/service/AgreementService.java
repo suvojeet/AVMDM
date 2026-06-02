@@ -1,16 +1,16 @@
 package com.averio.mdm.service;
 
 import com.averio.mdm.domain.cosmos.AgreementDoc;
+import com.averio.mdm.domain.event.AverioMdmEvent;
 import com.averio.mdm.repository.cosmos.AgreementDocRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Optional;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -18,7 +18,8 @@ import java.util.stream.Stream;
 @RequiredArgsConstructor
 public class AgreementService {
 
-    private final AgreementDocRepository repo;
+    private final AgreementDocRepository   repo;
+    private final ApplicationEventPublisher eventPublisher;
 
     public List<AgreementDoc> getAll() {
         List<AgreementDoc> all = new ArrayList<>();
@@ -60,7 +61,9 @@ public class AgreementService {
         agreement.setUpdatedAt(LocalDateTime.now());
         agreement.setIsGolden(true);
         agreement.setVersion(1L);
-        return repo.save(agreement);
+        AgreementDoc saved = repo.save(agreement);
+        publishEvent(AverioMdmEvent.AGREEMENT_CREATED, saved.getGlobalAgreementId(), saved);
+        return saved;
     }
 
     public AgreementDoc update(String id, AgreementDoc updates) {
@@ -73,10 +76,24 @@ public class AgreementService {
         if (updates.getAttributes() != null) existing.setAttributes(updates.getAttributes());
         existing.setUpdatedAt(LocalDateTime.now());
         existing.setVersion(existing.getVersion() == null ? 1L : existing.getVersion() + 1);
-        return repo.save(existing);
+        AgreementDoc saved = repo.save(existing);
+        publishEvent(AverioMdmEvent.AGREEMENT_UPDATED, saved.getGlobalAgreementId(), saved);
+        return saved;
     }
 
     public void delete(String id) {
         repo.deleteById(id);
+    }
+
+    private void publishEvent(String type, String entityId, Object entity) {
+        try {
+            eventPublisher.publishEvent(AverioMdmEvent.builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .eventType(type).domain("AGREEMENT")
+                    .entityId(entityId).tenantId("default")
+                    .entity(entity).timestamp(Instant.now()).build());
+        } catch (Exception e) {
+            log.warn("Failed to publish {} event for agreement {}: {}", type, entityId, e.getMessage());
+        }
     }
 }

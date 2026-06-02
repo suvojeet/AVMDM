@@ -1,8 +1,11 @@
 import { useRef, useState } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { partyApi, addressApi, phoneApi, emailApi, referenceDataApi } from "../../services/api";
-import type { PartyAddress, PartyPhone, PartyEmail } from "../../services/api";
+import {
+  partyApi, addressApi, phoneApi, emailApi, referenceDataApi,
+  dynamicSchemaApi, dynamicAttributeApi,
+} from "../../services/api";
+import type { PartyAddress, PartyPhone, PartyEmail, DynamicSchema, DynamicAttributeValue } from "../../services/api";
 import { formatDate, formatDateTime } from "../../utils/dateUtils";
 import {
   ArrowLeft, Star, Edit2, GitMerge, Clock, ExternalLink,
@@ -1606,6 +1609,20 @@ export default function PartyDetail() {
   const [editForm,        setEditForm]        = useState<Record<string, string>>({});
   const [editIdentifiers, setEditIdentifiers] = useState<IdentifierEntry[]>([]);
   const [editError,       setEditError]       = useState<string | null>(null);
+  const [editDynValues,   setEditDynValues]   = useState<Record<string, Record<string, unknown>>>({});
+
+  // Dynamic schemas + current attribute values — used by both the edit form and DynamicAttributesSection
+  const { data: dynSchemas = [] } = useQuery<DynamicSchema[]>({
+    queryKey: ["dynamic-schemas", "PARTY"],
+    queryFn:  () => dynamicSchemaApi.getActiveForDomain("PARTY"),
+    staleTime: 60_000,
+  });
+
+  const { data: dynAttrValues = [], refetch: refetchDynAttrs } = useQuery<DynamicAttributeValue[]>({
+    queryKey: ["dynamic-attributes", "PARTY", globalId],
+    queryFn:  () => dynamicAttributeApi.getForEntity("PARTY", globalId!),
+    enabled:  !!globalId,
+  });
 
   const [goldenIdExpand,  setGoldenIdExpand]  = useState(false);
   const [goldenIdInput,   setGoldenIdInput]   = useState("");
@@ -1658,6 +1675,18 @@ export default function PartyDetail() {
   const isOrg        = party.partyType === "ORGANIZATION";
   const isIndividual = party.partyType === "INDIVIDUAL" || party.partyType === "EMPLOYEE";
 
+  // Schemas applicable to this party type, excluding core object extensions
+  const editAppSchemas = (dynSchemas as DynamicSchema[]).filter((s) => {
+    if (s.coreObjectType) return false;
+    const types = s.partyTypes ?? [];
+    return types.length === 0 || types.includes(party.partyType ?? "");
+  });
+
+  // ATTRIBUTE_GROUP schemas (single-instance, !allowMultiple) → rendered inline inside Identity Attributes card
+  const identityAttrSchemas = editAppSchemas.filter(
+    (s) => s.schemaType !== "OBJECT_LIST" && !s.allowMultiple
+  );
+
   function addEditIdentifier() {
     setEditIdentifiers((ids) => [...ids, { type: "", value: "", issuer: "", countryOfIssue: "", startDate: "", expiryDate: "", category: "", expanded: false }]);
   }
@@ -1670,6 +1699,13 @@ export default function PartyDetail() {
 
   function openEdit() {
     setEditError(null);
+    // Seed dynamic attribute values from already-fetched attribute docs
+    const bySchema: Record<string, Record<string, unknown>> = {};
+    (dynAttrValues as DynamicAttributeValue[]).forEach((v) => {
+      if (v.schemaKey) bySchema[v.schemaKey] = { ...(v.values ?? {}) };
+    });
+    setEditDynValues(bySchema);
+
     const existingIds: IdentifierEntry[] = ((party.identifiers ?? []) as Record<string, string>[]).map((id) => ({
       type:           id.type           ?? "",
       value:          id.value          ?? "",
@@ -1686,6 +1722,7 @@ export default function PartyDetail() {
       middleName:         party.middleName         ?? "",
       lastName:           party.lastName           ?? "",
       dateOfBirth:        party.dateOfBirth        ?? "",
+      dateOfDeath:        party.dateOfDeath        ?? "",
       gender:             party.gender             ?? "",
       nationality:        party.nationality        ?? "",
       countryOfResidence: party.countryOfResidence ?? "",
@@ -1787,6 +1824,7 @@ export default function PartyDetail() {
                   ["Last Name",            party.lastName,           null],
                   ["Full Name",            party.fullName,           null],
                   ["Date of Birth",        party.dateOfBirth,        null],
+                  ["Date of Death",        party.dateOfDeath,        null],
                   ["Gender",               party.gender,             null],
                   ["Nationality",          party.nationality,        null],
                   ["Country of Residence", party.countryOfResidence, null],
@@ -1819,6 +1857,39 @@ export default function PartyDetail() {
                   </div>
                 ));
               })()}
+
+              {/* ATTRIBUTE_GROUP dynamic schemas — single-instance fields inline with identity */}
+              {identityAttrSchemas.map((schema) => {
+                const attrDoc = (dynAttrValues as DynamicAttributeValue[]).find(
+                  (v) => v.schemaKey === schema.schemaKey
+                );
+                const vals = attrDoc?.values ?? {};
+
+                if (schema.isReferenceData) {
+                  const displayVal = vals["value"] as string | undefined;
+                  return (
+                    <div key={schema.schemaKey}>
+                      <p className="text-[11px] text-aq-dim font-medium uppercase tracking-wide">{schema.displayName}</p>
+                      <p className={clsx("text-sm mt-0.5 font-mono", displayVal ? "text-aq-text" : "text-aq-dim/40 italic font-sans")}>
+                        {displayVal ?? "Not provided"}
+                      </p>
+                    </div>
+                  );
+                }
+
+                return (schema.fields ?? []).map((field) => {
+                  const rawVal = vals[field.fieldKey];
+                  const displayVal = rawVal != null ? String(rawVal) : undefined;
+                  return (
+                    <div key={`${schema.schemaKey}-${field.fieldKey}`}>
+                      <p className="text-[11px] text-aq-dim font-medium uppercase tracking-wide">{field.label}</p>
+                      <p className={clsx("text-sm mt-0.5 font-mono", displayVal ? "text-aq-text" : "text-aq-dim/40 italic font-sans")}>
+                        {displayVal ?? "Not provided"}
+                      </p>
+                    </div>
+                  );
+                });
+              })}
             </div>
           </div>
 
@@ -1849,8 +1920,13 @@ export default function PartyDetail() {
           {/* Email Addresses */}
           <EmailSection globalId={globalId!} />
 
-          {/* Dynamic custom attributes defined by steward */}
-          <DynamicAttributesSection domain="PARTY" entityId={globalId!} partyType={party.partyType} />
+          {/* Dynamic OBJECT_LIST / allowMultiple schemas — ATTRIBUTE_GROUP ones are shown inline above */}
+          <DynamicAttributesSection
+            domain="PARTY"
+            entityId={globalId!}
+            partyType={party.partyType}
+            excludeSchemaKeys={identityAttrSchemas.map((s) => s.schemaKey)}
+          />
         </div>
 
         {/* Right column */}
@@ -1990,6 +2066,7 @@ export default function PartyDetail() {
                 { key: "middleName",  label: "Middle Name" },
                 { key: "lastName",    label: "Last Name" },
                 { key: "dateOfBirth", label: "Date of Birth", placeholder: "YYYY-MM-DD" },
+                { key: "dateOfDeath", label: "Date of Death", placeholder: "YYYY-MM-DD" },
               ].map(({ key, label, placeholder }) => (
                 <div key={key} className="space-y-1">
                   <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">{label}</label>
@@ -2071,6 +2148,95 @@ export default function PartyDetail() {
                   />
                 </div>
               ))}
+
+              {/* Dynamic custom attributes */}
+              {editAppSchemas.length > 0 && (
+                <div className="space-y-3 border-t border-aq-border/50 pt-3">
+                  {editAppSchemas.map((schema) => {
+                    const fieldCls = "w-full bg-aq-dark border border-aq-border rounded-lg px-3 py-2 text-sm text-aq-text focus:outline-none focus:border-aq-blue/60 transition-colors";
+                    if (schema.isReferenceData && schema.referenceDataCategory) {
+                      return (
+                        <div key={schema.schemaKey} className="space-y-1">
+                          <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
+                            {schema.displayName}
+                          </label>
+                          <ReferenceSelect
+                            category={schema.referenceDataCategory}
+                            value={String(editDynValues[schema.schemaKey]?.value ?? "")}
+                            onChange={(v) =>
+                              setEditDynValues((prev) => ({
+                                ...prev,
+                                [schema.schemaKey]: { value: v },
+                              }))
+                            }
+                            placeholder="— Select —"
+                            className={fieldCls}
+                          />
+                          {schema.description && (
+                            <p className="text-[10px] text-aq-dim">{schema.description}</p>
+                          )}
+                        </div>
+                      );
+                    }
+                    return (schema.fields ?? []).map((field) => (
+                      <div key={`${schema.schemaKey}.${field.fieldKey}`} className="space-y-1">
+                        <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
+                          {field.label}
+                          {field.required && <span className="text-red-400 ml-0.5">*</span>}
+                        </label>
+                        {field.fieldType === "REFERENCE_DATA" ? (
+                          <ReferenceSelect
+                            category={field.referenceCategory ?? ""}
+                            value={String(editDynValues[schema.schemaKey]?.[field.fieldKey] ?? "")}
+                            onChange={(v) =>
+                              setEditDynValues((prev) => ({
+                                ...prev,
+                                [schema.schemaKey]: { ...(prev[schema.schemaKey] ?? {}), [field.fieldKey]: v },
+                              }))
+                            }
+                            placeholder="— Select —"
+                            className={fieldCls}
+                          />
+                        ) : field.fieldType === "BOOLEAN" ? (
+                          <label className="flex items-center gap-2 cursor-pointer mt-1">
+                            <input type="checkbox" className="w-4 h-4 rounded border-aq-border accent-aq-blue"
+                              checked={Boolean(editDynValues[schema.schemaKey]?.[field.fieldKey])}
+                              onChange={(e) =>
+                                setEditDynValues((prev) => ({
+                                  ...prev,
+                                  [schema.schemaKey]: { ...(prev[schema.schemaKey] ?? {}), [field.fieldKey]: e.target.checked },
+                                }))
+                              }
+                            />
+                            <span className="text-sm text-aq-dim">Yes</span>
+                          </label>
+                        ) : (
+                          <input
+                            type={field.fieldType === "NUMBER" ? "number" : field.fieldType === "DATE" ? "date" : "text"}
+                            className={fieldCls}
+                            placeholder={field.placeholder ?? ""}
+                            value={String(editDynValues[schema.schemaKey]?.[field.fieldKey] ?? "")}
+                            onChange={(e) =>
+                              setEditDynValues((prev) => ({
+                                ...prev,
+                                [schema.schemaKey]: {
+                                  ...(prev[schema.schemaKey] ?? {}),
+                                  [field.fieldKey]: field.fieldType === "NUMBER" && e.target.value
+                                    ? Number(e.target.value)
+                                    : e.target.value,
+                                },
+                              }))
+                            }
+                          />
+                        )}
+                        {field.helpText && (
+                          <p className="text-[10px] text-aq-dim">{field.helpText}</p>
+                        )}
+                      </div>
+                    ));
+                  })}
+                </div>
+              )}
 
               {/* Identifiers */}
               <div className="space-y-2">
@@ -2204,7 +2370,7 @@ export default function PartyDetail() {
                 Cancel
               </button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!editForm.sourceSystemId?.trim()) {
                     setEditError("Source System ID is required");
                     return;
@@ -2220,7 +2386,28 @@ export default function PartyDetail() {
                       if (rest.category)       id.category       = rest.category;
                       return id;
                     });
-                  updateMut.mutate({ ...editForm, identifiers: filledIds } as Record<string, unknown>);
+                  try {
+                    await updateMut.mutateAsync({ ...editForm, identifiers: filledIds } as Record<string, unknown>);
+                    // Save dynamic attribute values in parallel
+                    await Promise.all(
+                      editAppSchemas
+                        .filter((schema) => {
+                          const vals = editDynValues[schema.schemaKey];
+                          if (!vals) return false;
+                          return schema.isReferenceData
+                            ? !!vals.value
+                            : Object.values(vals).some((v) => v != null && v !== "");
+                        })
+                        .map((schema) =>
+                          dynamicAttributeApi.saveSchemaValues("PARTY", globalId!, schema.schemaKey, [{
+                            entityId: globalId!, domain: "PARTY",
+                            schemaKey: schema.schemaKey, instanceId: "default",
+                            values: editDynValues[schema.schemaKey],
+                          }])
+                        )
+                    );
+                    qc.invalidateQueries({ queryKey: ["dynamic-attributes", "PARTY", globalId] });
+                  } catch (_) { /* errors already handled by updateMut.onError */ }
                 }}
                 disabled={updateMut.isPending}
                 className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm

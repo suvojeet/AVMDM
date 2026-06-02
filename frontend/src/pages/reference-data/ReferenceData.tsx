@@ -75,25 +75,41 @@ function SlideOver({ open, onClose, title, children }: {
 
 // ── Add / Edit Item form ──────────────────────────────────────────────────────
 
-function ItemForm({ category, attrDefs, onSave, onClose }: {
+function ItemForm({ category, attrDefs, initial, existingCodes, serverError, onSave, onClose }: {
   category: string;
   attrDefs: AttrDef[];
+  initial?: RefItem;
+  existingCodes?: number[];
+  serverError?: string | null;
   onSave: (data: Record<string, unknown>) => void;
   onClose: () => void;
 }) {
-  const [code, setCode] = useState("");
-  const [value, setValue] = useState("");
-  const [description, setDescription] = useState("");
-  const [sortOrder, setSortOrder] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [attrs, setAttrs] = useState<Record<string, string>>({});
+  const isEditing = !!initial;
+  const [code, setCode] = useState(initial ? String(initial.code) : "");
+  const [value, setValue] = useState(initial?.value ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [sortOrder, setSortOrder] = useState(initial?.sortOrder != null ? String(initial.sortOrder) : "");
+  const [expiryDate, setExpiryDate] = useState(initial?.expiryDate ?? "");
+  const [attrs, setAttrs] = useState<Record<string, string>>(
+    Object.fromEntries(
+      attrDefs.map((a) => [a.name, initial?.attributes?.[a.name] != null ? String(initial.attributes[a.name]) : ""])
+    )
+  );
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   const setAttr = (k: string, v: string) => setAttrs((a) => ({ ...a, [k]: v }));
 
   function validate() {
     const e: Record<string, string> = {};
-    if (!code.trim() || isNaN(Number(code))) e.code = "Valid numeric code required";
+    if (!code.trim() || isNaN(Number(code))) {
+      e.code = "Valid numeric code required";
+    } else {
+      const numCode = Number(code);
+      const codeChanged = !isEditing || numCode !== initial!.code;
+      if (codeChanged && existingCodes?.includes(numCode)) {
+        e.code = `Code ${numCode} already exists in this category`;
+      }
+    }
     if (!value.trim()) e.value = "Display value is required";
     attrDefs.forEach((a) => {
       if (a.required && !attrs[a.name]?.trim()) e[`attr_${a.name}`] = `${a.label} is required`;
@@ -107,13 +123,14 @@ function ItemForm({ category, attrDefs, onSave, onClose }: {
     const attrPayload: Record<string, unknown> = {};
     attrDefs.forEach((a) => { if (attrs[a.name]) attrPayload[a.name] = attrs[a.name]; });
     onSave({
+      ...(initial ?? {}),
       category,
       code: Number(code),
       value: value.trim(),
       description: description.trim() || null,
       sortOrder: sortOrder ? Number(sortOrder) : null,
       expiryDate: expiryDate || null,
-      isActive: true,
+      isActive: initial?.isActive ?? true,
       attributes: Object.keys(attrPayload).length > 0 ? attrPayload : null,
     });
   }
@@ -124,10 +141,14 @@ function ItemForm({ category, attrDefs, onSave, onClose }: {
         <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">
           Numeric Code <span className="text-red-400">*</span>
         </label>
-        <input className={clsx(inputCls, errors.code && "border-red-500/60")}
-          placeholder="e.g. 100011" value={code} onChange={(e) => setCode(e.target.value)} />
+        <input
+          className={clsx(inputCls, errors.code && "border-red-500/60")}
+          placeholder="e.g. 100011"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+        />
         {errors.code && <p className="text-xs text-red-400">{errors.code}</p>}
-        <p className="text-[10px] text-aq-dim">Stored in data records for backend processing.</p>
+        <p className="text-[10px] text-aq-dim">Must be unique within this category.</p>
       </div>
 
       <div className="space-y-1">
@@ -199,14 +220,20 @@ function ItemForm({ category, attrDefs, onSave, onClose }: {
         </div>
       )}
 
+      {serverError && (
+        <div className="flex items-center gap-2 px-3 py-2.5 bg-red-500/10 border border-red-500/25 rounded-lg text-xs text-red-400">
+          <AlertCircle size={13} className="flex-shrink-0" /> {serverError}
+        </div>
+      )}
+
       <div className="flex justify-end gap-3 pt-2 border-t border-aq-border">
         <button onClick={onClose}
           className="px-4 py-2 rounded-lg text-sm font-medium text-aq-dim border border-aq-border hover:bg-aq-border/40 transition-colors">
           Cancel
         </button>
         <button onClick={submit}
-          className="px-4 py-2 rounded-lg text-sm font-semibold bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30 hover:bg-aq-blue/30 transition-colors">
-          Add Item
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30 hover:bg-aq-blue/30 transition-colors">
+          <Save size={13} /> {isEditing ? "Save Changes" : "Add Item"}
         </button>
       </div>
     </div>
@@ -215,11 +242,12 @@ function ItemForm({ category, attrDefs, onSave, onClose }: {
 
 // ── Category section (Items tab) ──────────────────────────────────────────────
 
-function CategorySection({ category, items, attrDefs, onAdd, onDelete, onReactivate }: {
+function CategorySection({ category, items, attrDefs, onAdd, onEdit, onDelete, onReactivate }: {
   category: Category;
   items: RefItem[];
   attrDefs: AttrDef[];
   onAdd: (cat: string) => void;
+  onEdit: (item: RefItem) => void;
   onDelete: (id: string) => void;
   onReactivate: (id: string) => void;
 }) {
@@ -232,17 +260,19 @@ function CategorySection({ category, items, attrDefs, onAdd, onDelete, onReactiv
     ? Array.from(new Set(items.map((i) => String(i.attributes?.countryCode ?? "")).filter(Boolean))).sort()
     : [];
 
-  const filtered = items.filter((i) => {
-    const q = search.toLowerCase();
-    const matchSearch = !q ||
-      i.value.toLowerCase().includes(q) ||
-      String(i.code).includes(q) ||
-      (i.description ?? "").toLowerCase().includes(q) ||
-      (isStateProvince && String(i.attributes?.countryCode ?? "").toLowerCase().includes(q));
-    const matchCountry = !countryFilter ||
-      String(i.attributes?.countryCode ?? "") === countryFilter;
-    return matchSearch && matchCountry;
-  });
+  const filtered = items
+    .filter((i) => {
+      const q = search.toLowerCase();
+      const matchSearch = !q ||
+        i.value.toLowerCase().includes(q) ||
+        String(i.code).includes(q) ||
+        (i.description ?? "").toLowerCase().includes(q) ||
+        (isStateProvince && String(i.attributes?.countryCode ?? "").toLowerCase().includes(q));
+      const matchCountry = !countryFilter ||
+        String(i.attributes?.countryCode ?? "") === countryFilter;
+      return matchSearch && matchCountry;
+    })
+    .sort((a, b) => a.code - b.code);
 
   const colorCls = catColor(category.colorHint);
 
@@ -430,6 +460,15 @@ function CategorySection({ category, items, attrDefs, onAdd, onDelete, onReactiv
                             title={item.endDate ? "Restore (undelete)" : "Reactivate"}
                           >
                             <RotateCcw size={12} />
+                          </button>
+                        )}
+                        {!item.endDate && (
+                          <button
+                            onClick={() => onEdit(item)}
+                            className="p-1 rounded text-aq-dim hover:text-aq-blue-2 hover:bg-aq-blue/10 transition-colors"
+                            title="Edit"
+                          >
+                            <Edit2 size={12} />
                           </button>
                         )}
                         {!item.endDate && (
@@ -812,6 +851,8 @@ function SchemaTab({ categories, onRefresh }: { categories: Category[]; onRefres
 export default function ReferenceData() {
   const [tab, setTab] = useState<"items" | "schema">("items");
   const [addFor, setAddFor] = useState<string | null>(null);
+  const [editFor, setEditFor] = useState<RefItem | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [globalSearch, setGlobalSearch] = useState("");
   const qc = useQueryClient();
 
@@ -835,6 +876,12 @@ export default function ReferenceData() {
     onSuccess: () => {
       invalidateAll();
       setAddFor(null);
+      setEditFor(null);
+      setSaveError(null);
+    },
+    onError: (err: unknown) => {
+      const axErr = err as { response?: { data?: { error?: string } }; message?: string };
+      setSaveError(axErr?.response?.data?.error ?? axErr?.message ?? "Failed to save item");
     },
   });
 
@@ -999,6 +1046,7 @@ export default function ReferenceData() {
                   items={groupedData[key] ?? []}
                   attrDefs={getAttrDefs(key)}
                   onAdd={(c) => setAddFor(c)}
+                  onEdit={(item) => setEditFor(item)}
                   onDelete={(id) => deleteMut.mutate(id)}
                   onReactivate={(id) => reactivateMut.mutate(id)}
                 />
@@ -1016,15 +1064,37 @@ export default function ReferenceData() {
       {/* Add item slide-over */}
       <SlideOver
         open={!!addFor}
-        onClose={() => setAddFor(null)}
+        onClose={() => { setAddFor(null); setSaveError(null); }}
         title={addFor ? `Add item to ${getCategoryForKey(addFor).displayName}` : ""}
       >
         {addFor && (
           <ItemForm
             category={addFor}
             attrDefs={getAttrDefs(addFor)}
+            serverError={saveError}
             onSave={(data) => saveMut.mutate(data)}
-            onClose={() => setAddFor(null)}
+            onClose={() => { setAddFor(null); setSaveError(null); }}
+          />
+        )}
+      </SlideOver>
+
+      {/* Edit item slide-over */}
+      <SlideOver
+        open={!!editFor}
+        onClose={() => { setEditFor(null); setSaveError(null); }}
+        title={editFor ? `Edit — ${editFor.value} (${editFor.category})` : ""}
+      >
+        {editFor && (
+          <ItemForm
+            category={editFor.category}
+            attrDefs={getAttrDefs(editFor.category)}
+            initial={editFor}
+            existingCodes={(groupedData[editFor.category] ?? [])
+              .filter((i) => i.id !== editFor.id)
+              .map((i) => i.code)}
+            serverError={saveError}
+            onSave={(data) => saveMut.mutate(data)}
+            onClose={() => { setEditFor(null); setSaveError(null); }}
           />
         )}
       </SlideOver>

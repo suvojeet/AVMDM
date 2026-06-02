@@ -77,8 +77,12 @@ public class ReferenceDataController {
 
     @PostMapping
     @Operation(summary = "Create or update a reference data item")
-    public ResponseEntity<ReferenceDataItem> save(@RequestBody ReferenceDataItem item) {
-        return ResponseEntity.ok(service.save(item));
+    public ResponseEntity<?> save(@RequestBody ReferenceDataItem item) {
+        try {
+            return ResponseEntity.ok(service.save(item));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
     }
 
     @DeleteMapping("/{id}")

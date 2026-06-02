@@ -11,4 +11,5 @@ public interface DynamicAttributeRepository extends CosmosRepository<DynamicAttr
     List<DynamicAttributeValue> findByEntityId(String entityId);
     List<DynamicAttributeValue> findByEntityIdAndDomain(String entityId, String domain);
     List<DynamicAttributeValue> findByEntityIdAndSchemaKey(String entityId, String schemaKey);
+    List<DynamicAttributeValue> findBySchemaKey(String schemaKey);
 }

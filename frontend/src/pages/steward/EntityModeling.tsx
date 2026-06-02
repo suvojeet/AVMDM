@@ -5,6 +5,8 @@ import {
   Layers, Plus, Edit2, Trash2, X, ChevronDown, ChevronUp,
   ToggleLeft, ToggleRight, GripVertical, Database, CheckCircle,
   AlertCircle, Save, Eye, EyeOff, Hash, Shield, Link, BookOpen,
+  Puzzle, MapPin, Phone, Mail, CreditCard, Building2, FileText,
+  Package, GitFork, Tag, DollarSign, Users,
 } from "lucide-react";
 import clsx from "clsx";
 import toast from "react-hot-toast";
@@ -206,6 +208,26 @@ function FieldRow({ field, idx, onChange, onRemove, onMove, total }: {
   );
 }
 
+// ── Field hint detector ───────────────────────────────────────────────────────
+
+const FIELD_HINTS: { keywords: string[]; type: string; label: string; icon: string }[] = [
+  { keywords: ["date", "dob", "birthday", "expiry", "expiration", "issued", "inception", "start_date", "end_date", "due_date", "from_date", "to_date", "deceased", "valid_until", "effective"], type: "DATE",    label: "Date",           icon: "📅" },
+  { keywords: ["email", "e-mail", "mail"],                                                                                                                                                         type: "EMAIL",   label: "Email",          icon: "@"  },
+  { keywords: ["phone", "mobile", "tel", "fax", "contact_number"],                                                                                                                                type: "PHONE",   label: "Phone",          icon: "☎"  },
+  { keywords: ["url", "website", "link", "href", "site"],                                                                                                                                          type: "URL",     label: "URL",            icon: "🔗" },
+  { keywords: ["amount", "value", "count", "number", "qty", "quantity", "score", "rate", "price", "cost", "salary", "income", "revenue", "age", "year"],                                          type: "NUMBER",  label: "Number",         icon: "#"  },
+  { keywords: ["is_", "has_", "flag", "bool", "active", "enabled", "deceased", "verified", "approved", "consent"],                                                                                type: "BOOLEAN", label: "Yes / No",       icon: "◎"  },
+  { keywords: ["note", "comment", "description", "remarks", "detail", "bio", "summary", "address_line", "reason"],                                                                                type: "TEXTAREA", label: "Text Area",     icon: "¶"  },
+];
+
+function detectFieldHint(displayName: string, schemaKey: string): { type: string; label: string; icon: string } | null {
+  const haystack = (displayName + " " + schemaKey).toLowerCase();
+  for (const hint of FIELD_HINTS) {
+    if (hint.keywords.some((kw) => haystack.includes(kw))) return hint;
+  }
+  return null;
+}
+
 // ── Schema Form (slide-over) ──────────────────────────────────────────────────
 
 const PARTY_TYPES = [
@@ -215,11 +237,47 @@ const PARTY_TYPES = [
   { value: "EMPLOYEE",     label: "Employee"     },
 ];
 
+// ── Core Object definitions per domain ───────────────────────────────────────
+
+type CoreObjectDef = {
+  key: string; label: string; icon: React.ElementType;
+  description: string; defaultSchemaType: string;
+};
+
+const CORE_OBJECTS_BY_DOMAIN: Record<Domain, CoreObjectDef[]> = {
+  PARTY: [
+    { key: "IDENTIFIER",  label: "Identifier",     icon: CreditCard,  description: "Passport, SSN, Driving Licence, National ID etc.", defaultSchemaType: "OBJECT_LIST" },
+    { key: "ADDRESS",     label: "Address",         icon: MapPin,      description: "Registered, Correspondence, Billing addresses",     defaultSchemaType: "OBJECT_LIST" },
+    { key: "PHONE",       label: "Phone Number",    icon: Phone,       description: "Mobile, Work, Home phone numbers",                   defaultSchemaType: "OBJECT_LIST" },
+    { key: "EMAIL",       label: "Email Address",   icon: Mail,        description: "Primary and secondary email addresses",              defaultSchemaType: "OBJECT_LIST" },
+    { key: "RELATIONSHIP",label: "Relationship",    icon: GitFork,     description: "Party-to-party relationships",                       defaultSchemaType: "OBJECT_LIST" },
+  ],
+  ACCOUNT: [
+    { key: "ACCOUNT_DETAIL", label: "Account Detail", icon: Building2,  description: "Core account attributes and classification",       defaultSchemaType: "ATTRIBUTE_GROUP" },
+    { key: "ADDRESS",        label: "Address",         icon: MapPin,     description: "Billing and correspondence addresses",             defaultSchemaType: "OBJECT_LIST"    },
+    { key: "CONTACT",        label: "Contact",         icon: Users,      description: "Account contact persons",                          defaultSchemaType: "OBJECT_LIST"    },
+  ],
+  AGREEMENT: [
+    { key: "AGREEMENT_TERM", label: "Agreement Terms", icon: FileText,   description: "Terms, conditions and clauses",                   defaultSchemaType: "OBJECT_LIST"    },
+    { key: "PARTY_ROLE",     label: "Party Role",      icon: Users,      description: "Roles of parties involved in the agreement",       defaultSchemaType: "OBJECT_LIST"    },
+    { key: "PAYMENT",        label: "Payment Schedule", icon: DollarSign, description: "Payment amounts, dates and schedules",            defaultSchemaType: "OBJECT_LIST"    },
+  ],
+  PRODUCT: [
+    { key: "PRODUCT_ATTRIBUTE", label: "Product Attribute", icon: Tag,      description: "Core product properties and specifications", defaultSchemaType: "ATTRIBUTE_GROUP" },
+    { key: "PRICING",           label: "Pricing",            icon: DollarSign, description: "Price tiers, schedules and discounts",   defaultSchemaType: "OBJECT_LIST"    },
+    { key: "CLASSIFICATION",    label: "Classification",     icon: Package,  description: "Product categories and taxonomy",           defaultSchemaType: "ATTRIBUTE_GROUP" },
+  ],
+  RELATIONSHIP: [
+    { key: "RELATIONSHIP_DETAIL", label: "Relationship Detail", icon: GitFork, description: "Core relationship properties",           defaultSchemaType: "ATTRIBUTE_GROUP" },
+    { key: "ROLE",                label: "Role",                 icon: Users,   description: "Roles of parties in the relationship",   defaultSchemaType: "OBJECT_LIST"    },
+  ],
+};
+
 const EMPTY_SCHEMA: Omit<DynamicSchema, "id"> = {
   domain: "PARTY", schemaKey: "", displayName: "", description: "",
   schemaType: "ATTRIBUTE_GROUP", allowMultiple: false, isActive: true,
   colorHint: "blue", displayOrder: 10, fields: [], partyTypes: [],
-  isReferenceData: false, referenceDataCategory: "",
+  isReferenceData: false, referenceDataCategory: "", coreObjectType: undefined,
 };
 
 function SchemaForm({ initial, onSave, onClose }: {
@@ -297,18 +355,43 @@ function SchemaForm({ initial, onSave, onClose }: {
     });
   }
 
+  const coreObjDef = form.coreObjectType
+    ? (CORE_OBJECTS_BY_DOMAIN[form.domain as Domain] ?? []).find((c) => c.key === form.coreObjectType)
+    : null;
+
   return (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-5 py-4 border-b border-aq-border flex-shrink-0">
-        <h2 className="text-base font-semibold text-aq-text">
-          {editing ? "Edit Schema" : "New Schema"}
-        </h2>
+        <div className="flex items-center gap-2.5">
+          <h2 className="text-base font-semibold text-aq-text">
+            {editing ? "Edit Schema" : form.coreObjectType ? "Extend Core Object" : "New Schema"}
+          </h2>
+          {form.coreObjectType && coreObjDef && (
+            <span className="flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-orange-500/10 text-orange-300 border-orange-500/25">
+              <Puzzle size={9} /> Extends {coreObjDef.label}
+            </span>
+          )}
+        </div>
         <button onClick={onClose} className="text-aq-dim hover:text-aq-text transition-colors">
           <X size={18} />
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto p-5 space-y-5">
+        {/* Core Object extension notice */}
+        {form.coreObjectType && coreObjDef && (
+          <div className="flex items-start gap-3 px-4 py-3 bg-orange-500/5 border border-orange-500/20 rounded-xl text-xs text-orange-200">
+            <Puzzle size={14} className="text-orange-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <p className="font-semibold text-orange-300">Core Object Extension</p>
+              <p className="text-orange-200/70 mt-0.5">
+                Fields added here will appear in every <strong>{coreObjDef.label}</strong> record
+                across the <strong>{DOMAIN_LABELS[form.domain as Domain]}</strong> domain.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Domain + Type */}
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
@@ -521,11 +604,40 @@ function SchemaForm({ initial, onSave, onClose }: {
               </button>
             </div>
 
-            {fields.length === 0 && (
-              <div className="text-center py-6 border border-dashed border-aq-border rounded-lg text-xs text-aq-dim">
-                No fields yet — click "Add Field" to define the first attribute.
-              </div>
-            )}
+            {fields.length === 0 && (() => {
+              const hint = detectFieldHint(form.displayName, form.schemaKey);
+              return (
+                <div className="space-y-2">
+                  {hint && (
+                    <button
+                      type="button"
+                      onClick={() => setFields([{
+                        ...EMPTY_FIELD,
+                        label: form.displayName,
+                        fieldKey: form.schemaKey,
+                        fieldType: hint.type,
+                        displayOrder: 0,
+                      }])}
+                      className="w-full flex items-center gap-3 px-4 py-3 rounded-lg border border-dashed border-aq-blue/40 bg-aq-blue/5 hover:bg-aq-blue/10 transition-colors text-left"
+                    >
+                      <span className="text-xl">{hint.icon}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-aq-blue-2">
+                          Auto-add: <strong>{hint.label}</strong> field
+                        </p>
+                        <p className="text-[10px] text-aq-dim mt-0.5">
+                          Detected from schema name — click to add a pre-filled <strong>{hint.type}</strong> field
+                        </p>
+                      </div>
+                      <Plus size={13} className="text-aq-blue-2 flex-shrink-0" />
+                    </button>
+                  )}
+                  <div className="text-center py-4 border border-dashed border-aq-border rounded-lg text-xs text-aq-dim">
+                    {hint ? 'Or click "Add Field" to define a custom field.' : 'No fields yet — click "Add Field" to define the first attribute.'}
+                  </div>
+                </div>
+              );
+            })()}
 
             {fields.map((f, i) => (
               <FieldRow
@@ -597,6 +709,11 @@ function SchemaCard({ schema, onEdit, onToggle, onDelete }: {
             )}>
               {schema.schemaType === "OBJECT_LIST" ? "OBJECT LIST" : "ATTR GROUP"}
             </span>
+            {schema.coreObjectType && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-orange-500/10 text-orange-300 border-orange-500/25 flex items-center gap-1">
+                <Puzzle size={9} /> {schema.coreObjectType}
+              </span>
+            )}
             {schema.isReferenceData && (
               <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/25 flex items-center gap-1">
                 <BookOpen size={9} /> REF DATA
@@ -688,9 +805,10 @@ function SchemaCard({ schema, onEdit, onToggle, onDelete }: {
 
 export default function EntityModeling() {
   const qc = useQueryClient();
-  const [activeDomain, setActiveDomain] = useState<Domain>("PARTY");
-  const [slideOpen, setSlideOpen] = useState(false);
-  const [editing, setEditing] = useState<DynamicSchema | undefined>(undefined);
+  const [activeDomain, setActiveDomain]   = useState<Domain>("PARTY");
+  const [activeView, setActiveView]       = useState<"custom" | "extensions">("custom");
+  const [slideOpen, setSlideOpen]         = useState(false);
+  const [editing, setEditing]             = useState<DynamicSchema | undefined>(undefined);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
   const { data: schemas = [], isLoading } = useQuery<DynamicSchema[]>({
@@ -730,7 +848,22 @@ export default function EntityModeling() {
   });
 
   function openNew() {
-    setEditing(undefined);
+    setEditing({ ...EMPTY_SCHEMA, domain: activeDomain, coreObjectType: undefined } as DynamicSchema);
+    setSlideOpen(true);
+  }
+
+  function openNewExtension(coreObj: CoreObjectDef) {
+    const schemaKey = `${activeDomain.toLowerCase()}_${coreObj.key.toLowerCase()}_ext`;
+    setEditing({
+      ...EMPTY_SCHEMA,
+      domain: activeDomain,
+      coreObjectType: coreObj.key,
+      displayName: `${DOMAIN_LABELS[activeDomain]} ${coreObj.label} Extension`,
+      schemaKey,
+      schemaType: coreObj.defaultSchemaType,
+      allowMultiple: coreObj.defaultSchemaType === "OBJECT_LIST",
+      colorHint: "orange",
+    } as DynamicSchema);
     setSlideOpen(true);
   }
 
@@ -739,7 +872,9 @@ export default function EntityModeling() {
     setSlideOpen(true);
   }
 
-  const totalFields = (schemas as DynamicSchema[]).reduce((n, s) => n + (s.fields?.length ?? 0), 0);
+  const customSchemas    = (schemas as DynamicSchema[]).filter((s) => !s.coreObjectType);
+  const extensionSchemas = (schemas as DynamicSchema[]).filter((s) => !!s.coreObjectType);
+  const totalFields      = (schemas as DynamicSchema[]).reduce((n, s) => n + (s.fields?.length ?? 0), 0);
 
   return (
     <div className="space-y-5">
@@ -764,13 +899,12 @@ export default function EntityModeling() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-4 gap-3">
         {[
-          { label: "Schemas", value: (schemas as DynamicSchema[]).length, color: "text-purple-400" },
-          { label: "Total Fields", value: totalFields, color: "text-blue-400" },
-          { label: "Active",
-            value: (schemas as DynamicSchema[]).filter((s) => s.isActive).length,
-            color: "text-emerald-400" },
+          { label: "Custom Schemas",  value: customSchemas.length,    color: "text-purple-400" },
+          { label: "Core Extensions", value: extensionSchemas.length,  color: "text-orange-400" },
+          { label: "Total Fields",    value: totalFields,              color: "text-blue-400"   },
+          { label: "Active",          value: (schemas as DynamicSchema[]).filter((s) => s.isActive).length, color: "text-emerald-400" },
         ].map(({ label, value, color }) => (
           <div key={label} className="bg-aq-card border border-aq-border rounded-xl p-3">
             <p className="text-xs text-aq-dim">{label}</p>
@@ -782,9 +916,7 @@ export default function EntityModeling() {
       {/* Domain tabs */}
       <div className="flex gap-1 bg-aq-dark border border-aq-border rounded-xl p-1 w-fit flex-wrap">
         {DOMAINS.map((d) => (
-          <button
-            key={d}
-            onClick={() => setActiveDomain(d)}
+          <button key={d} onClick={() => setActiveDomain(d)}
             className={clsx(
               "px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
               activeDomain === d
@@ -796,31 +928,153 @@ export default function EntityModeling() {
         ))}
       </div>
 
-      {/* Schema list */}
-      {isLoading ? (
-        <div className="text-center py-12 text-aq-dim text-sm">Loading schemas…</div>
-      ) : (schemas as DynamicSchema[]).length === 0 ? (
-        <div className="text-center py-16 border border-dashed border-aq-border rounded-xl space-y-3">
-          <Layers size={32} className="text-aq-dim/30 mx-auto" />
-          <p className="text-sm text-aq-dim">
-            No schemas defined for <span className="text-aq-text font-medium">{DOMAIN_LABELS[activeDomain]}</span>.
+      {/* View switcher */}
+      <div className="flex gap-1 bg-aq-dark border border-aq-border rounded-xl p-1 w-fit">
+        <button
+          onClick={() => setActiveView("custom")}
+          className={clsx(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+            activeView === "custom"
+              ? "bg-aq-card text-aq-text shadow border border-aq-border/60"
+              : "text-aq-dim hover:text-aq-text"
+          )}>
+          <Layers size={12} /> Custom Schemas
+          {customSchemas.length > 0 && (
+            <span className="ml-1 bg-purple-500/20 text-purple-300 rounded-full px-1.5 text-[9px] font-bold">
+              {customSchemas.length}
+            </span>
+          )}
+        </button>
+        <button
+          onClick={() => setActiveView("extensions")}
+          className={clsx(
+            "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all",
+            activeView === "extensions"
+              ? "bg-aq-card text-aq-text shadow border border-aq-border/60"
+              : "text-aq-dim hover:text-aq-text"
+          )}>
+          <Puzzle size={12} /> Core Object Extensions
+          {extensionSchemas.length > 0 && (
+            <span className="ml-1 bg-orange-500/20 text-orange-300 rounded-full px-1.5 text-[9px] font-bold">
+              {extensionSchemas.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* ── Custom Schemas view ── */}
+      {activeView === "custom" && (
+        isLoading ? (
+          <div className="text-center py-12 text-aq-dim text-sm">Loading schemas…</div>
+        ) : customSchemas.length === 0 ? (
+          <div className="text-center py-16 border border-dashed border-aq-border rounded-xl space-y-3">
+            <Layers size={32} className="text-aq-dim/30 mx-auto" />
+            <p className="text-sm text-aq-dim">
+              No custom schemas for <span className="text-aq-text font-medium">{DOMAIN_LABELS[activeDomain]}</span>.
+            </p>
+            <button onClick={openNew}
+              className="flex items-center gap-2 mx-auto px-4 py-2 bg-aq-blue/15 text-aq-blue-2 border border-aq-blue/25 rounded-lg text-xs font-medium hover:bg-aq-blue/25 transition-colors">
+              <Plus size={12} /> Create first schema
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {customSchemas.map((s) => (
+              <SchemaCard key={s.id} schema={s}
+                onEdit={() => openEdit(s)}
+                onToggle={() => s.id && toggleMut.mutate(s.id)}
+                onDelete={() => setDeleteConfirm(s.id ?? null)} />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── Core Object Extensions view ── */}
+      {activeView === "extensions" && (
+        <div className="space-y-4">
+          <p className="text-xs text-aq-dim">
+            Extend the built-in objects of the <span className="text-aq-text font-medium">{DOMAIN_LABELS[activeDomain]}</span> domain
+            by adding extra fields. These fields will appear alongside the core fields in every record.
           </p>
-          <button onClick={openNew}
-            className="flex items-center gap-2 mx-auto px-4 py-2 bg-aq-blue/15 text-aq-blue-2 border border-aq-blue/25 rounded-lg text-xs font-medium hover:bg-aq-blue/25 transition-colors">
-            <Plus size={12} /> Create first schema
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {(schemas as DynamicSchema[]).map((s) => (
-            <SchemaCard
-              key={s.id}
-              schema={s}
-              onEdit={() => openEdit(s)}
-              onToggle={() => s.id && toggleMut.mutate(s.id)}
-              onDelete={() => setDeleteConfirm(s.id ?? null)}
-            />
-          ))}
+
+          {isLoading ? (
+            <div className="text-center py-12 text-aq-dim text-sm">Loading…</div>
+          ) : (
+            <div className="grid grid-cols-1 gap-3">
+              {(CORE_OBJECTS_BY_DOMAIN[activeDomain] ?? []).map((coreObj) => {
+                const Icon = coreObj.icon;
+                const existing = extensionSchemas.filter((s) => s.coreObjectType === coreObj.key);
+                return (
+                  <div key={coreObj.key}
+                    className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+                    {/* Core object header */}
+                    <div className="flex items-center gap-3 px-4 py-3 border-b border-aq-border/50">
+                      <div className="w-8 h-8 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center flex-shrink-0">
+                        <Icon size={15} className="text-orange-400" />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-aq-text">{coreObj.label}</span>
+                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-orange-500/10 text-orange-300 border-orange-500/25">
+                            CORE OBJECT
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-aq-dim mt-0.5">{coreObj.description}</p>
+                      </div>
+                      <button
+                        onClick={() => openNewExtension(coreObj)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 bg-orange-500/10 text-orange-300 border border-orange-500/25 rounded-lg text-xs font-medium hover:bg-orange-500/20 transition-colors flex-shrink-0">
+                        <Plus size={12} /> Add Extension
+                      </button>
+                    </div>
+
+                    {/* Existing extension schemas for this core object */}
+                    {existing.length > 0 ? (
+                      <div className="divide-y divide-aq-border/30">
+                        {existing.map((s) => (
+                          <div key={s.id} className={clsx("px-4 py-2.5 flex items-center gap-3", !s.isActive && "opacity-50")}>
+                            <div className={clsx("w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 text-[9px]", colorOf(s.colorHint))}>
+                              <Database size={10} />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-medium text-aq-text">{s.displayName}</span>
+                                <code className="text-[9px] font-mono text-aq-dim/60 bg-aq-dark px-1 py-0.5 rounded">{s.schemaKey}</code>
+                                <span className="text-[9px] text-aq-dim">
+                                  {s.fields?.length ?? 0} field{s.fields?.length !== 1 ? "s" : ""}
+                                </span>
+                                {!s.isActive && (
+                                  <span className="text-[9px] px-1 py-0.5 rounded border bg-slate-500/10 text-slate-400 border-slate-500/25">INACTIVE</span>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-1 flex-shrink-0">
+                              <button onClick={() => openEdit(s)} className="p-1.5 rounded text-aq-dim hover:text-aq-blue-2 transition-colors" title="Edit">
+                                <Edit2 size={13} />
+                              </button>
+                              <button onClick={() => s.id && toggleMut.mutate(s.id)}
+                                className="p-1.5 rounded text-aq-dim hover:text-aq-text transition-colors" title="Toggle">
+                                {s.isActive
+                                  ? <ToggleRight size={13} className="text-emerald-400" />
+                                  : <ToggleLeft size={13} />}
+                              </button>
+                              <button onClick={() => setDeleteConfirm(s.id ?? null)} className="p-1.5 rounded text-aq-dim hover:text-red-400 transition-colors" title="Delete">
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="px-4 py-3 text-[11px] text-aq-dim/60 italic">
+                        No extension fields defined yet — click "Add Extension" to extend this object.
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

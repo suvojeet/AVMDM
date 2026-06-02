@@ -36,10 +36,10 @@ public class ChatbotController {
                 "Show me parties with data quality below 70%",
                 "What's in the steward work queue right now?",
                 "Find all organizations named JP Morgan",
-                "What are the top survivorship rules configured?",
+                "How do I add a new field to the Party entity?",
+                "How do I extend the Identifier object with extra fields?",
                 "Show me critical priority steward tasks",
-                "Find duplicate candidates for party GLD-00001",
-                "What compliance frameworks are we monitoring?"
+                "What is the difference between a core field and a dynamic schema field?"
         ));
     }
 

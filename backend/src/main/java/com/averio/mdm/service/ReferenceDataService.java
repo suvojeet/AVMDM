@@ -3,6 +3,10 @@ package com.averio.mdm.service;
 import com.averio.mdm.domain.reference.ReferenceCategory;
 import com.averio.mdm.domain.reference.ReferenceCategory.AttributeDefinition;
 import com.averio.mdm.domain.reference.ReferenceDataItem;
+import com.averio.mdm.domain.steward.DynamicAttributeValue;
+import com.averio.mdm.domain.steward.DynamicSchema;
+import com.averio.mdm.repository.cosmos.DynamicAttributeRepository;
+import com.averio.mdm.repository.cosmos.DynamicSchemaRepository;
 import com.averio.mdm.repository.cosmos.ReferenceCategoryRepository;
 import com.averio.mdm.repository.cosmos.ReferenceDataRepository;
 import jakarta.annotation.PostConstruct;
@@ -31,6 +35,8 @@ public class ReferenceDataService {
     private final ReferenceDataRepository repo;
     private final ReferenceCategoryRepository catRepo;
     private final CacheManager cacheManager;
+    private final DynamicSchemaRepository dynamicSchemaRepo;
+    private final DynamicAttributeRepository dynamicAttrRepo;
 
     @PostConstruct
     void seedIfAbsent() {
@@ -126,17 +132,118 @@ public class ReferenceDataService {
     }
 
     @Caching(evict = {
-        @CacheEvict(value = "referenceData",       key = "#item.category"),
-        @CacheEvict(value = "referenceDataActive",  key = "#item.category")
+        @CacheEvict(value = "referenceData",       allEntries = true),
+        @CacheEvict(value = "referenceDataActive",  allEntries = true)
     })
     public ReferenceDataItem save(ReferenceDataItem item) {
-        if (item.getId() == null || item.getId().isBlank()) {
-            item.setId(item.getCategory() + "_" + item.getCode());
-            item.setCreatedAt(LocalDateTime.now());
+        if (item.getCategory() != null) {
+            item.setCategory(item.getCategory().toUpperCase());
         }
+
+        String derivedId = item.getCategory() + "_" + item.getCode();
+        boolean isNew = item.getId() == null || item.getId().isBlank();
+        Long oldCodeForCascade = null;
+
+        if (isNew) {
+            // New item — check uniqueness before insert
+            if (!repo.findByCategoryAndCode(item.getCategory(), item.getCode()).isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Code " + item.getCode() + " already exists in category " + item.getCategory());
+            }
+            item.setId(derivedId);
+            item.setCreatedAt(LocalDateTime.now());
+        } else if (!derivedId.equals(item.getId())) {
+            // Code was changed — verify uniqueness of new code, then rename (delete + insert)
+            if (!repo.findByCategoryAndCode(item.getCategory(), item.getCode()).isEmpty()) {
+                throw new IllegalArgumentException(
+                    "Code " + item.getCode() + " already exists in category " + item.getCategory());
+            }
+            // Extract old code from existing ID: format is "{category}_{oldCode}"
+            oldCodeForCascade = Long.parseLong(item.getId().substring(item.getCategory().length() + 1));
+            repo.findById(item.getId()).ifPresent(repo::delete);
+            item.setId(derivedId);
+        }
+
         if (item.getIsActive() == null) item.setIsActive(true);
         item.setUpdatedAt(LocalDateTime.now());
-        return repo.save(item);
+        ReferenceDataItem saved = repo.save(item);
+
+        if (oldCodeForCascade != null) {
+            cascadeCodeChange(item.getCategory(), oldCodeForCascade, item.getCode());
+        }
+
+        return saved;
+    }
+
+    /**
+     * Finds every DynamicAttributeValue document whose schema has a REFERENCE_DATA field
+     * pointing to {@code category}, and replaces any occurrence of {@code oldCode} with
+     * {@code newCode} in that field's stored value.
+     */
+    private void cascadeCodeChange(String category, Long oldCode, Long newCode) {
+        log.info("Cascading reference code change [{} : {} → {}]", category, oldCode, newCode);
+
+        // 1. Find all DynamicSchemas that have at least one REFERENCE_DATA field for this category
+        List<DynamicSchema> allSchemas = new ArrayList<>();
+        dynamicSchemaRepo.findAll().forEach(allSchemas::add);
+
+        List<DynamicSchema> affected = allSchemas.stream()
+            .filter(s -> s.getFields() != null)
+            .filter(s -> s.getFields().stream().anyMatch(f ->
+                "REFERENCE_DATA".equals(f.getFieldType()) && category.equals(f.getReferenceCategory())))
+            .collect(Collectors.toList());
+
+        if (affected.isEmpty()) {
+            log.info("No dynamic schemas reference category [{}] — cascade skipped", category);
+            return;
+        }
+
+        int totalUpdated = 0;
+
+        for (DynamicSchema schema : affected) {
+            // Collect the specific field keys that reference this category
+            List<String> fieldKeys = schema.getFields().stream()
+                .filter(f -> "REFERENCE_DATA".equals(f.getFieldType()) && category.equals(f.getReferenceCategory()))
+                .map(DynamicSchema.FieldDefinition::getFieldKey)
+                .collect(Collectors.toList());
+
+            // Cross-partition query — acceptable for an admin code-rename operation
+            List<DynamicAttributeValue> docs = dynamicAttrRepo.findBySchemaKey(schema.getSchemaKey());
+
+            for (DynamicAttributeValue doc : docs) {
+                if (doc.getValues() == null) continue;
+                boolean dirty = false;
+                for (String fieldKey : fieldKeys) {
+                    Object stored = doc.getValues().get(fieldKey);
+                    if (stored != null && referenceCodeMatches(stored, oldCode)) {
+                        doc.getValues().put(fieldKey, newCode);
+                        dirty = true;
+                    }
+                }
+                if (dirty) {
+                    doc.setUpdatedAt(LocalDateTime.now());
+                    try {
+                        dynamicAttrRepo.save(doc);
+                        totalUpdated++;
+                    } catch (Exception e) {
+                        log.error("Cascade failed for dynamic attribute doc [{}]: {}", doc.getId(), e.getMessage());
+                    }
+                }
+            }
+        }
+
+        log.info("Code cascade [{} : {} → {}] complete — {} attribute records updated",
+            category, oldCode, newCode, totalUpdated);
+    }
+
+    private static boolean referenceCodeMatches(Object stored, Long code) {
+        if (stored instanceof Long l)    return l.equals(code);
+        if (stored instanceof Integer i) return code.equals((long) i);
+        if (stored instanceof Number n)  return n.longValue() == code;
+        if (stored instanceof String s)  {
+            try { return Long.parseLong(s) == code; } catch (NumberFormatException ignored) {}
+        }
+        return false;
     }
 
     /** Clears expiry, end date and deletedBy so item is fully live again in modules. */
@@ -245,7 +352,7 @@ public class ReferenceDataService {
             if (Boolean.TRUE.equals(cat.getIsSystem())) {
                 throw new IllegalStateException("System category '" + key + "' cannot be deleted");
             }
-            catRepo.deleteById(key);
+            catRepo.delete(cat);
         });
     }
 

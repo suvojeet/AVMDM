@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { partyApi, addressApi, phoneApi, emailApi, referenceDataApi } from "../../services/api";
+import {
+  partyApi, addressApi, phoneApi, emailApi, referenceDataApi,
+  dynamicSchemaApi, dynamicAttributeApi,
+} from "../../services/api";
+import type { DynamicSchema, FieldDefinition } from "../../services/api";
 import {
   ArrowLeft, User, Building2, Home, Briefcase,
   Plus, Trash2, AlertCircle, CheckCircle, ChevronDown, ChevronUp,
@@ -197,6 +201,48 @@ function StepIndicator({
   );
 }
 
+// ── Dynamic field renderer (create-time, no entityId yet) ────────────────────
+
+function DynFieldInput({ field, value, onChange }: {
+  field: FieldDefinition;
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const str = value != null ? String(value) : "";
+  switch (field.fieldType) {
+    case "REFERENCE_DATA":
+      return (
+        <ReferenceSelect
+          category={field.referenceCategory ?? ""}
+          value={str}
+          onChange={(v) => onChange(v)}
+          placeholder="— Select —"
+          className={selectCls}
+        />
+      );
+    case "BOOLEAN":
+      return (
+        <label className="flex items-center gap-2 cursor-pointer mt-1">
+          <input type="checkbox" className="w-4 h-4 rounded border-aq-border accent-aq-blue"
+            checked={Boolean(value)} onChange={(e) => onChange(e.target.checked)} />
+          <span className="text-sm text-aq-dim">Yes</span>
+        </label>
+      );
+    case "DATE":
+      return <DatePicker value={str} onChange={(v) => onChange(v)} placeholder="Select date" />;
+    case "NUMBER":
+      return <input type="number" className={inputCls} placeholder={field.placeholder ?? ""}
+        value={str} onChange={(e) => onChange(e.target.value ? Number(e.target.value) : "")} />;
+    case "TEXTAREA":
+      return <textarea className={clsx(inputCls, "resize-none")} rows={2}
+        placeholder={field.placeholder ?? ""} value={str}
+        onChange={(e) => onChange(e.target.value)} />;
+    default:
+      return <input type="text" className={inputCls} placeholder={field.placeholder ?? ""}
+        value={str} onChange={(e) => onChange(e.target.value)} />;
+  }
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 
 export default function CreateParty() {
@@ -234,6 +280,28 @@ export default function CreateParty() {
     queryKey: ["ref", "STATE_PROVINCE"],
     queryFn:  () => referenceDataApi.getActiveByCategory("STATE_PROVINCE"),
   });
+
+  // Dynamic schemas — fetched once, filtered per partyType in render
+  const { data: allDynSchemas = [] } = useQuery<DynamicSchema[]>({
+    queryKey: ["dynamic-schemas", "PARTY"],
+    queryFn:  () => dynamicSchemaApi.getActiveForDomain("PARTY"),
+  });
+
+  // Schemas applicable to the currently selected party type (exclude core extensions)
+  const appSchemas = (allDynSchemas as DynamicSchema[]).filter((s) => {
+    if (s.coreObjectType) return false; // core extensions only apply to existing records
+    const types = s.partyTypes ?? [];
+    return types.length === 0 || !partyType || types.includes(partyType);
+  });
+
+  // Dynamic attribute values collected before the party is created
+  const [dynValues, setDynValues] = useState<Record<string, Record<string, unknown>>>({});
+  function setDynField(schemaKey: string, fieldKey: string, value: unknown) {
+    setDynValues((prev) => ({
+      ...prev,
+      [schemaKey]: { ...(prev[schemaKey] ?? {}), [fieldKey]: value },
+    }));
+  }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   const set = (k: string, v: string) => {
@@ -301,6 +369,25 @@ export default function CreateParty() {
           })),
         ]);
       } catch (_) { /* party created; contact info editable on detail page */ }
+
+      // Save dynamic attribute values for schemas that had values entered
+      for (const schema of appSchemas) {
+        const vals = dynValues[schema.schemaKey];
+        if (!vals) continue;
+        const hasValue = schema.isReferenceData
+          ? !!vals.value
+          : Object.values(vals).some((v) => v != null && v !== "");
+        if (hasValue) {
+          try {
+            await dynamicAttributeApi.saveSchemaValues("PARTY", gid, schema.schemaKey, [{
+              entityId: gid, domain: "PARTY",
+              schemaKey: schema.schemaKey, instanceId: "default",
+              values: vals,
+            }]);
+          } catch (_) { /* non-fatal; user can fill in on detail page */ }
+        }
+      }
+
       navigate(`/parties/${gid}`);
     },
   });
@@ -656,6 +743,48 @@ export default function CreateParty() {
                   value={form.fullName} onChange={(e) => set("fullName", e.target.value)} />
               </Field>
             </>
+          )}
+
+          {/* Dynamic custom attributes defined in Entity Modeling */}
+          {appSchemas.length > 0 && (
+            <div className="border-t border-aq-border/50 pt-4 space-y-4">
+              <p className="text-[10px] font-semibold text-aq-dim uppercase tracking-widest">
+                Custom Attributes
+              </p>
+              <div className="grid grid-cols-2 gap-4">
+                {appSchemas.flatMap((schema) => {
+                  if (schema.isReferenceData && schema.referenceDataCategory) {
+                    return [(
+                      <Field key={schema.schemaKey} label={schema.displayName}>
+                        <ReferenceSelect
+                          category={schema.referenceDataCategory}
+                          value={String(dynValues[schema.schemaKey]?.value ?? "")}
+                          onChange={(v) => setDynField(schema.schemaKey, "value", v)}
+                          placeholder="— Select —"
+                          className={selectCls}
+                        />
+                        {schema.description && (
+                          <p className="text-[10px] text-aq-dim mt-0.5">{schema.description}</p>
+                        )}
+                      </Field>
+                    )];
+                  }
+                  return (schema.fields ?? []).map((field) => (
+                    <Field key={`${schema.schemaKey}.${field.fieldKey}`} label={field.label}
+                      required={field.required ?? false}>
+                      <DynFieldInput
+                        field={field}
+                        value={dynValues[schema.schemaKey]?.[field.fieldKey]}
+                        onChange={(v) => setDynField(schema.schemaKey, field.fieldKey, v)}
+                      />
+                      {field.helpText && (
+                        <p className="text-[10px] text-aq-dim mt-0.5">{field.helpText}</p>
+                      )}
+                    </Field>
+                  ));
+                })}
+              </div>
+            </div>
           )}
 
           <NavFooter />
@@ -1118,6 +1247,31 @@ export default function CreateParty() {
               )}
             </div>
           </div>
+
+          {/* Custom Attributes */}
+          {appSchemas.length > 0 && Object.keys(dynValues).some((k) => {
+            const vals = dynValues[k];
+            return vals && Object.values(vals).some((v) => v != null && v !== "");
+          }) && (
+            <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+              <ReviewSectionHeader title="Custom Attributes" stepIdx={2} onEdit={goTo} />
+              <div className="px-5 pb-5">
+                <ReviewGrid rows={
+                  appSchemas.flatMap((schema): [string, string | undefined][] => {
+                    const vals = dynValues[schema.schemaKey];
+                    if (!vals) return [];
+                    if (schema.isReferenceData) {
+                      const v = vals.value;
+                      return v ? [[schema.displayName, String(v)]] : [];
+                    }
+                    return (schema.fields ?? [])
+                      .filter((f) => vals[f.fieldKey] != null && vals[f.fieldKey] !== "")
+                      .map((f) => [f.label, String(vals[f.fieldKey])]);
+                  })
+                } />
+              </div>
+            </div>
+          )}
 
           {/* Contact & IDs */}
           <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">

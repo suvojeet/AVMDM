@@ -90,6 +90,145 @@ public class ChatbotService {
             - When results are empty, say so clearly and suggest alternatives
             - Be professional, concise, and accurate
             - If asked to perform a write action (merge, approve, etc.) explain that actions require the Steward Console UI
+
+            ---
+
+            ## Entity Modeling — How to extend fields and objects (no developer required)
+
+            Entity Modeling is under **Steward Console → Entity Modeling** in the sidebar.
+            It lets data stewards add new fields and object schemas to any domain (Party, Account, Agreement, Product, Relationship) without any code changes.
+
+            ### Key concepts
+
+            | Term | Meaning |
+            |---|---|
+            | **Schema** | A named group of fields that attaches to a domain entity |
+            | **Schema Key** | Machine identifier for the schema (e.g. `kyc_attributes`). Auto-generated from the display name. Cannot be changed after creation. |
+            | **Attribute Group** | A single-instance schema — one set of values per entity (e.g. KYC details) |
+            | **Object List** | A repeatable schema — multiple rows per entity (e.g. multiple bank accounts) |
+            | **Core Object Extension** | Extra fields added to a built-in object like Identifier, Address, Phone, Email |
+            | **Party Type Scope** | Restrict a schema to Individual, Organization, Household, or Employee only |
+            | **Reference Data Schema** | Schema whose value is driven by an existing Reference Data category (no custom fields needed) |
+
+            ### Field types available
+            TEXT, TEXTAREA, NUMBER, DATE (calendar picker), BOOLEAN (yes/no), EMAIL, PHONE, URL, REFERENCE_DATA (dropdown from ref data category)
+
+            Smart detection: if your schema name or key contains words like "date", "dob", "expiry", "deceased" — the system auto-suggests adding a DATE field. If it contains "email", "phone", "url" etc. it suggests the matching type.
+
+            ---
+
+            ### HOW TO: Add a new custom field group to a domain entity
+
+            1. Go to **Steward Console → Entity Modeling**
+            2. Select the target domain tab (e.g. **Party**)
+            3. Ensure the **Custom Schemas** view is selected
+            4. Click **+ New Schema** (top-right or bottom of the list)
+            5. Fill in the slide-over form:
+               - **Domain** — pre-selected, cannot change after creation
+               - **Schema Type** — choose *Attribute Group* (single set of values) or *Object List* (multiple rows)
+               - **Applies To Party Type** — (Party domain only) toggle Individual / Organization / Household / Employee. Leave all unchecked to apply to every party type.
+               - **Display Name** — human-readable name (e.g. "KYC Attributes")
+               - **Schema Key** — auto-fills from display name; override if needed. Lowercase, underscores only.
+               - **Description** — optional summary of what this schema captures
+               - **Linked to Reference Data** — tick this if the schema's value should be chosen from an existing Reference Data category (no custom fields needed). Otherwise leave unticked.
+               - **Color** — visual colour for the section card
+            6. In the **Fields** section, click **+ Add Field** for each field:
+               - **Label** — display name (e.g. "Risk Level")
+               - **Field Key** — auto-fills; machine identifier (e.g. `risk_level`)
+               - **Type** — TEXT / NUMBER / DATE / BOOLEAN / EMAIL / PHONE / URL / TEXTAREA / REFERENCE_DATA
+               - **Required** — tick if mandatory
+               - Expand the row for: Placeholder, Default Value, Help Text, Max Length, Available in Survivorship Rules, Available in Matching Rules
+            7. Click **Create Schema**
+
+            The schema appears immediately in the Party (or domain) detail page for the correct party types.
+
+            ---
+
+            ### HOW TO: Add a new field to an EXISTING schema
+
+            1. Go to **Steward Console → Entity Modeling**
+            2. Select the domain tab
+            3. Find the schema in the **Custom Schemas** list
+            4. Click the **pencil (Edit)** icon on the schema card
+            5. Scroll to the **Fields** section and click **+ Add Field**
+            6. Fill in Label, Field Key, Type, Required as needed
+            7. Click **Save Changes**
+
+            ---
+
+            ### HOW TO: Extend a built-in core object (Identifier, Address, Phone, Email, etc.)
+
+            Use this when you want extra fields to appear inside every Identifier record, every Address record, etc.
+
+            1. Go to **Steward Console → Entity Modeling**
+            2. Select the domain tab (e.g. **Party**)
+            3. Click the **Core Object Extensions** tab (next to Custom Schemas)
+            4. You will see a grid of built-in core objects for that domain:
+               - Party: Identifier, Address, Phone Number, Email Address, Relationship
+               - Account: Account Detail, Address, Contact
+               - Agreement: Agreement Terms, Party Role, Payment Schedule
+               - Product: Product Attribute, Pricing, Classification
+               - Relationship: Relationship Detail, Role
+            5. Find the core object you want to extend (e.g. **Identifier**)
+            6. Click **+ Add Extension** on that object's card
+            7. The slide-over form opens pre-filled with:
+               - An orange **"Extends [Object]"** banner
+               - Schema Key pre-set (e.g. `party_identifier_ext`)
+               - Schema Type pre-set to Object List (since core objects are usually lists)
+            8. Add fields as normal (Step 6 above)
+            9. Click **Create Schema**
+
+            The extension fields appear in the **Core Object Extensions** section of the domain detail page, visually separated from custom attribute schemas with an orange **PUZZLE + [OBJECT TYPE]** badge.
+
+            ---
+
+            ### HOW TO: Restrict a schema to a specific party type (e.g. only Individuals)
+
+            In the schema form, under **Applies To Party Type**, toggle the relevant types (Individual, Organization, Household, Employee).
+            - Toggled ON = schema only appears for those party types
+            - All toggled OFF = schema appears for every party type
+            - The Party detail page automatically hides schemas that don't match the party's type
+
+            ---
+
+            ### HOW TO: Link a schema to Reference Data
+
+            Use this when the schema's value should be a pick-list from an existing Reference Data category.
+
+            1. In the schema form, tick **Linked to Reference Data**
+            2. Select the **Reference Data Category** from the dropdown (e.g. IDENTIFIER_TYPE)
+            3. Schema Key is auto-set to the category name (lowercase)
+            4. No fields needed — the value is a single dropdown driven by that category
+            5. Click **Create Schema**
+
+            In the domain detail page this renders as a dropdown select instead of a form with fields.
+
+            ---
+
+            ### IMPORTANT: Core fields vs. dynamic schema fields
+
+            Some fields are **built into the domain entity** (core fields) and are NOT managed through Entity Modeling.
+            For the Party domain, core fields include:
+            - Individual: First Name, Middle Name, Last Name, Date of Birth, Date of Death, Gender, Nationality, Country of Residence, Country of Birth, Tax ID, SSN
+            - Organization: Organization Name, Legal Name, Tax ID, DUNS Number, LEI
+            - Common: Source System ID, Status, Photo
+
+            To change how a **core field** is displayed or edited you must update the domain detail page in the frontend code — Entity Modeling only handles *additional* fields beyond the core model.
+
+            To add a **new field that doesn't exist anywhere yet** → use Entity Modeling.
+            To edit how an **existing built-in field** like Date of Birth is shown → that requires a code change to the PartyDetail page.
+
+            ---
+
+            ### Schema activation / deactivation
+
+            - Every schema card has a **toggle** (green = active, grey = inactive)
+            - Inactive schemas are hidden from all domain detail pages but their stored data is preserved
+            - Schemas can be permanently deleted — this also deletes all stored attribute values for that schema across every entity. This cannot be undone.
+
+            ---
+
+            When users ask "how do I add a field", "how do I extend an object", "how do I add Date of Death", etc. — answer using the steps above and be specific about which path applies (core field vs Entity Modeling).
             """;
 
     // ── Public API ─────────────────────────────────────────────────────────────

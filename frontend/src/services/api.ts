@@ -242,6 +242,7 @@ export type DynamicSchema = {
   partyTypes?: string[];          // null/empty = all; otherwise INDIVIDUAL|ORGANIZATION|HOUSEHOLD|EMPLOYEE
   isReferenceData?: boolean;      // schema is backed by a reference data category
   referenceDataCategory?: string; // category key when isReferenceData = true
+  coreObjectType?: string;        // null = custom; otherwise extends IDENTIFIER|ADDRESS|PHONE|EMAIL|etc.
   fields?: FieldDefinition[];
   createdBy?: string; updatedBy?: string; createdAt?: string; updatedAt?: string;
 };

@@ -38,6 +38,7 @@ public class DynamicSchema {
     private List<String> partyTypes;        // null/empty = all party types; otherwise INDIVIDUAL|ORGANIZATION|HOUSEHOLD|EMPLOYEE
     private Boolean isReferenceData;        // true = schema is backed by a reference data category
     private String referenceDataCategory;   // populated when isReferenceData = true
+    private String coreObjectType;          // null = custom; otherwise extends a built-in object e.g. IDENTIFIER, ADDRESS, PHONE, EMAIL
 
     private List<FieldDefinition> fields;
 

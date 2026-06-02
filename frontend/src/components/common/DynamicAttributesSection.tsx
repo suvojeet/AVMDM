@@ -5,9 +5,10 @@ import {
   DynamicSchema, DynamicAttributeValue, FieldDefinition,
 } from "../../services/api";
 import ReferenceSelect from "./ReferenceSelect";
+import DatePicker from "./DatePicker";
 import {
   Database, Plus, Edit2, Save, X, Trash2, ChevronDown,
-  ChevronUp, CheckCircle, AlertCircle, BookOpen,
+  ChevronUp, CheckCircle, AlertCircle, BookOpen, Puzzle,
 } from "lucide-react";
 import clsx from "clsx";
 import toast from "react-hot-toast";
@@ -58,8 +59,7 @@ function FieldInput({ field, value, onChange }: {
         </label>
       );
     case "DATE":
-      return <input type="date" className={base} value={str}
-        onChange={(e) => onChange(e.target.value)} />;
+      return <DatePicker value={str} onChange={(v) => onChange(v)} />;
     case "NUMBER":
       return <input type="number" className={base}
         placeholder={field.placeholder ?? ""}
@@ -322,6 +322,11 @@ function SchemaSection({ schema, instances, entityId, domain, onRefresh, readOnl
           {schema.isReferenceData ? <BookOpen size={11} /> : <Database size={11} />}
         </div>
         <span className="text-sm font-semibold text-aq-text">{schema.displayName}</span>
+        {schema.coreObjectType && (
+          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-orange-500/10 text-orange-300 border-orange-500/25 flex items-center gap-1">
+            <Puzzle size={9} /> {schema.coreObjectType}
+          </span>
+        )}
         {schema.isReferenceData && (
           <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-emerald-500/10 text-emerald-300 border-emerald-500/25">
             REF DATA
@@ -481,9 +486,10 @@ interface Props {
   entityId: string;
   partyType?: string;
   readOnly?: boolean;
+  excludeSchemaKeys?: string[];
 }
 
-export default function DynamicAttributesSection({ domain, entityId, partyType, readOnly = false }: Props) {
+export default function DynamicAttributesSection({ domain, entityId, partyType, readOnly = false, excludeSchemaKeys = [] }: Props) {
   const qc = useQueryClient();
 
   const { data: schemas = [], isLoading: schemasLoading } = useQuery<DynamicSchema[]>({
@@ -506,7 +512,13 @@ export default function DynamicAttributesSection({ domain, entityId, partyType, 
     return types.length === 0 || !partyType || types.includes(partyType);
   });
 
-  if (visibleSchemas.length === 0) return null;
+  const nonExcluded = visibleSchemas.filter((s) => !excludeSchemaKeys.includes(s.schemaKey));
+  if (nonExcluded.length === 0) return null;
+
+  // Split into custom schemas and core object extensions
+  // excludeSchemaKeys = ATTRIBUTE_GROUP schemas already rendered inline (e.g. inside Identity Attributes)
+  const customSchemas    = visibleSchemas.filter((s) => !s.coreObjectType && !excludeSchemaKeys.includes(s.schemaKey));
+  const extensionSchemas = visibleSchemas.filter((s) => !!s.coreObjectType && !excludeSchemaKeys.includes(s.schemaKey));
 
   // Group attribute values by schemaKey
   const bySchema: Record<string, DynamicAttributeValue[]> = {};
@@ -515,19 +527,42 @@ export default function DynamicAttributesSection({ domain, entityId, partyType, 
     bySchema[v.schemaKey!].push(v);
   });
 
+  function renderSection(schema: DynamicSchema) {
+    return (
+      <SchemaSection
+        key={schema.id}
+        schema={schema}
+        instances={bySchema[schema.schemaKey] ?? []}
+        entityId={entityId}
+        domain={domain}
+        readOnly={readOnly}
+        onRefresh={() => refetch()}
+      />
+    );
+  }
+
   return (
-    <div className="space-y-3">
-      {visibleSchemas.map((schema) => (
-        <SchemaSection
-          key={schema.id}
-          schema={schema}
-          instances={bySchema[schema.schemaKey] ?? []}
-          entityId={entityId}
-          domain={domain}
-          readOnly={readOnly}
-          onRefresh={() => refetch()}
-        />
-      ))}
+    <div className="space-y-4">
+      {/* Custom attribute schemas */}
+      {customSchemas.length > 0 && (
+        <div className="space-y-3">
+          {customSchemas.map(renderSection)}
+        </div>
+      )}
+
+      {/* Core object extension schemas — rendered under a distinct header */}
+      {extensionSchemas.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Puzzle size={12} className="text-orange-400" />
+            <span className="text-[10px] font-semibold text-orange-300 uppercase tracking-widest">
+              Core Object Extensions
+            </span>
+            <div className="flex-1 h-px bg-orange-500/20" />
+          </div>
+          {extensionSchemas.map(renderSection)}
+        </div>
+      )}
     </div>
   );
 }

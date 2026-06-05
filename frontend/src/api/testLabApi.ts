@@ -100,6 +100,41 @@ export interface AutomationStatus {
   };
 }
 
+export type ComponentStatus = "HEALTHY" | "DEGRADED" | "CRITICAL" | "UNAVAILABLE" | "NOT_RUN";
+export type OverallStatus   = "READY" | "CAUTION" | "NOT_READY";
+
+export interface ReportComponent {
+  name: string;
+  status: ComponentStatus;
+  passRate: number;
+  passed: number;
+  total: number;
+  failed: number;
+  errors: number;
+  skipped: number;
+  durationMs: number;
+  runId: string | null;
+  runAt: string | null;
+  criticalFailures: string[];
+}
+
+export interface HealthReport {
+  generatedAt: string;
+  overallStatus: OverallStatus;
+  readinessScore: number;
+  shipVerdict: string;
+  components: ReportComponent[];
+  summary: {
+    totalTests: number;
+    totalPassed: number;
+    totalFailed: number;
+    totalErrors: number;
+    totalSkipped: number;
+    suitesRun: number;
+    suitesTotal: number;
+  };
+}
+
 // ── API ────────────────────────────────────────────────────────────────────────
 
 export const testLabApi = {
@@ -147,4 +182,8 @@ export const testLabApi = {
   /** Get scheduled automation status (last nightly run, last health check). */
   getAutomationStatus: (): Promise<AutomationStatus> =>
     api.get("/test-lab/automation/status").then((r) => r.data),
+
+  /** Generate a pre-sales health report from the most recent test runs. */
+  getHealthReport: (): Promise<HealthReport> =>
+    api.get("/test-lab/report").then((r) => r.data),
 };

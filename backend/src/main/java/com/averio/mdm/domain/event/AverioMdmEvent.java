@@ -59,4 +59,6 @@ public class AverioMdmEvent {
 
     public static final String DYNAMIC_ATTRIBUTE_UPDATED  = "DYNAMIC_ATTRIBUTE_UPDATED";
     public static final String TEST_PING                  = "TEST_PING";
+
+    public static final String PARTY_AUTO_MERGED          = "PARTY_AUTO_MERGED";
 }

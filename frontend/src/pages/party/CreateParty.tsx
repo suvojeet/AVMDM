@@ -450,12 +450,35 @@ export default function CreateParty() {
   }
 
   // ── Address helpers ────────────────────────────────────────────────────────
-  const addrStateValue = addrForm.stateProvince ? `${addrForm.countryCode}::${addrForm.stateProvince}` : "";
+  // Derive the composite select value by looking up the matching option so the
+  // key always matches what the <option> elements render — avoids blank state
+  // when countryCode is set after stateProvince, or when the country changes.
+  const addrStateValue = (() => {
+    if (!addrForm.stateProvince) return "";
+    const exact = `${addrForm.countryCode}::${addrForm.stateProvince}`;
+    const items = stateItems as Array<{ value: string; attributes?: { countryCode?: string } }>;
+    // Prefer the option whose countryCode matches the currently selected country
+    const preferred = items.find(
+      (s) => s.value === addrForm.stateProvince && s.attributes?.countryCode === addrForm.countryCode
+    );
+    if (preferred) return exact;
+    // Fallback: find any option with this state code (different country prefix is still selectable)
+    const fallback = items.find((s) => s.value === addrForm.stateProvince);
+    if (fallback) return `${fallback.attributes?.countryCode ?? ""}::${fallback.value}`;
+    return exact;
+  })();
+
   function onAddrStateChange(composite: string) {
-    const sep = composite.indexOf("::");
-    const cc        = sep >= 0 ? composite.substring(0, sep) : addrForm.countryCode;
+    const sep       = composite.indexOf("::");
+    const cc        = sep >= 0 ? composite.substring(0, sep) : "";
     const stateCode = sep >= 0 ? composite.substring(sep + 2) : composite;
-    setAddrForm((f) => ({ ...f, stateProvince: stateCode, countryCode: cc || f.countryCode }));
+    setAddrForm((f) => ({
+      ...f,
+      stateProvince: stateCode,
+      // Only update countryCode if it wasn't already set — keeps an explicit
+      // country selection from being silently overwritten by the state's default
+      countryCode: f.countryCode || cc,
+    }));
   }
   function commitAddress() {
     setAddresses((arr) => [...arr, addrForm]);

@@ -43,6 +43,9 @@ public class PartyService {
     @Autowired(required = false)
     private StewardTaskRepository stewardTaskRepository;
 
+    @Autowired(required = false)
+    private com.averio.mdm.repository.cosmos.PartyDocRepository partyDocRepository;
+
     @Transactional("transactionManager")
     public Party ingestParty(Party incoming, String requestedBy) {
         log.info("Ingesting party from source={} sourceId={}", incoming.getSourceSystem(), incoming.getSourceSystemId());
@@ -105,18 +108,65 @@ public class PartyService {
         switch (matchResult.getAction()) {
             case AUTO_LINK -> {
                 MatchingEngine.MatchCandidate bestMatch = matchResult.getCandidates().get(0);
-                String goldenId = bestMatch.getParty().getGoldenRecordId();
-                incoming.setGoldenRecordId(goldenId);
+                String candidateGoldenId = bestMatch.getParty().getGoldenRecordId();
+
+                // Lower numeric golden ID always survives — merge the higher one away if needed
+                String survivingGoldenId = lowerGoldenId(
+                        incoming.getGoldenRecordId() != null ? incoming.getGoldenRecordId() : candidateGoldenId,
+                        candidateGoldenId);
+                String losingGoldenId = survivingGoldenId.equals(candidateGoldenId)
+                        ? incoming.getGoldenRecordId()
+                        : candidateGoldenId;
+
+                incoming.setGoldenRecordId(survivingGoldenId);
                 incoming.setMatchScore(matchResult.getBestMatchScore());
                 incoming.setIsGolden(false);
                 Party saved = partyRepository.save(incoming);
-                goldenRecordService.refreshGoldenRecord(goldenId, requestedBy);
+
+                // If the candidate had a different (higher) golden ID, migrate all its sources too
+                if (losingGoldenId != null && !losingGoldenId.equals(survivingGoldenId)) {
+                    List<Party> losingCluster = partyRepository.findByGoldenRecordId(losingGoldenId);
+                    losingCluster.forEach(p -> {
+                        p.setGoldenRecordId(survivingGoldenId);
+                        p.setUpdatedAt(LocalDateTime.now());
+                        p.setUpdatedBy(requestedBy);
+                    });
+                    partyRepository.saveAll(losingCluster);
+                    matchingEngine.removeFromIndex(losingGoldenId);
+                    goldenRecordService.markMerged(losingGoldenId, survivingGoldenId,
+                            "AUTO_LINK score=" + matchResult.getBestMatchScore(), requestedBy);
+                }
+
+                goldenRecordService.refreshGoldenRecord(survivingGoldenId, requestedBy);
                 safeIndexParty(saved);
                 safeRecordEvent(buildEvent(saved, "INGEST_AUTO_LINKED", requestedBy));
                 transactionLogService.logSuccess("PARTY", saved.getGlobalId(), "CREATE",
                         requestedBy, System.currentTimeMillis() - start, null, saved);
                 publishPartyEvent(AverioMdmEvent.PARTY_CREATED, saved);
-                log.info("Party auto-linked to golden record {} (score={})", goldenId, matchResult.getBestMatchScore());
+
+                // Real-time merge event for webhooks / SSE consumers
+                try {
+                    eventPublisher.publishEvent(AverioMdmEvent.builder()
+                            .eventId(UUID.randomUUID().toString())
+                            .eventType(AverioMdmEvent.PARTY_AUTO_MERGED)
+                            .domain("PARTY")
+                            .entityId(saved.getGlobalId())
+                            .tenantId("default")
+                            .entity(saved)
+                            .metadata(Map.of(
+                                "survivingGoldenId", survivingGoldenId,
+                                "mergedGoldenId",    losingGoldenId != null ? losingGoldenId : survivingGoldenId,
+                                "matchScore",        String.valueOf(matchResult.getBestMatchScore()),
+                                "matchMethod",       bestMatch.getMethod() != null ? bestMatch.getMethod() : "PROBABILISTIC",
+                                "trigger",           "AUTO_LINK"))
+                            .timestamp(java.time.Instant.now())
+                            .build());
+                } catch (Exception e) {
+                    log.warn("Failed to publish PARTY_AUTO_MERGED event: {}", e.getMessage());
+                }
+
+                log.info("Party auto-linked to golden {} (score={}, loserGolden={})",
+                        survivingGoldenId, matchResult.getBestMatchScore(), losingGoldenId);
                 return saved;
             }
             case SEND_TO_STEWARD -> {
@@ -239,24 +289,133 @@ public class PartyService {
     }
 
     @Transactional("transactionManager")
-    public void mergeGoldenRecords(String survivingGoldenId, String mergedGoldenId,
+    public void mergeGoldenRecords(String goldenIdA, String goldenIdB,
                                    String reason, String performedBy) {
+        // Always keep the lower numeric golden ID — deterministic survivor selection.
+        String survivingGoldenId = lowerGoldenId(goldenIdA, goldenIdB);
+        String mergedGoldenId    = survivingGoldenId.equals(goldenIdA) ? goldenIdB : goldenIdA;
+
+        log.info("mergeGoldenRecords: surviving={} merged={} by={}", survivingGoldenId, mergedGoldenId, performedBy);
         long start = System.currentTimeMillis();
-        List<Party> mergedSources = partyRepository.findByGoldenRecordId(mergedGoldenId);
-        mergedSources.forEach(p -> {
-            p.setGoldenRecordId(survivingGoldenId);
-            p.setUpdatedAt(LocalDateTime.now());
-            p.setUpdatedBy(performedBy);
-        });
-        partyRepository.saveAll(mergedSources);
-        matchingEngine.removeFromIndex(mergedGoldenId);
-        goldenRecordService.refreshGoldenRecord(survivingGoldenId, performedBy);
-        goldenRecordService.markMerged(mergedGoldenId, survivingGoldenId, reason, performedBy);
+        int neo4jUpdated = 0;
+        int cosmosUpdated = 0;
+
+        // ── 1. Neo4j ─────────────────────────────────────────────────────────
+        try {
+            List<Party> neo4jSources = partyRepository.findByGoldenRecordId(mergedGoldenId);
+            log.info("Neo4j: found {} source(s) under golden {}", neo4jSources.size(), mergedGoldenId);
+            neo4jSources.forEach(p -> {
+                p.setGoldenRecordId(survivingGoldenId);
+                p.setStatus("MERGED");
+                p.setUpdatedAt(LocalDateTime.now());
+                p.setUpdatedBy(performedBy);
+            });
+            if (!neo4jSources.isEmpty()) {
+                partyRepository.saveAll(neo4jSources);
+                neo4jUpdated = neo4jSources.size();
+                log.info("Neo4j: re-pointed {} record(s) to golden {}", neo4jUpdated, survivingGoldenId);
+            }
+            matchingEngine.removeFromIndex(mergedGoldenId);
+            goldenRecordService.refreshGoldenRecord(survivingGoldenId, performedBy);
+        } catch (Exception e) {
+            log.warn("Neo4j merge step failed (may be unavailable): {}", e.getMessage());
+        }
+
+        // ── 2. Cosmos ────────────────────────────────────────────────────────
+        if (partyDocRepository != null) {
+            try {
+                // Primary lookup: by goldenRecordId
+                List<com.averio.mdm.domain.cosmos.PartyDoc> cosmosSources =
+                        new ArrayList<>(partyDocRepository.findByGoldenRecordId(mergedGoldenId));
+
+                // Fallback: if the candidateId was actually a globalId (happens when Cosmos party
+                // had no goldenRecordId set — partyDocToParty uses globalId as fallback golden ID)
+                if (cosmosSources.isEmpty()) {
+                    log.info("Cosmos: no docs with goldenRecordId={}, trying as globalId", mergedGoldenId);
+                    partyDocRepository.findByGlobalId(mergedGoldenId).ifPresent(cosmosSources::add);
+                }
+
+                log.info("Cosmos: found {} source(s) under merged golden/globalId {}", cosmosSources.size(), mergedGoldenId);
+                cosmosSources.forEach(doc -> {
+                    doc.setGoldenRecordId(survivingGoldenId);
+                    doc.setStatus("MERGED");
+                    doc.setUpdatedAt(LocalDateTime.now());
+                    doc.setUpdatedBy(performedBy);
+                });
+                if (!cosmosSources.isEmpty()) {
+                    partyDocRepository.saveAll(cosmosSources);
+                    cosmosUpdated = cosmosSources.size();
+                    log.info("Cosmos: re-pointed {} doc(s) to golden {}", cosmosUpdated, survivingGoldenId);
+                }
+
+                // Also ensure the surviving party's goldenRecordId is set correctly in Cosmos
+                partyDocRepository.findByGoldenRecordId(survivingGoldenId).forEach(doc -> {
+                    if (doc.getGoldenRecordId() == null || !survivingGoldenId.equals(doc.getGoldenRecordId())) {
+                        doc.setGoldenRecordId(survivingGoldenId);
+                        doc.setUpdatedAt(LocalDateTime.now());
+                        doc.setUpdatedBy(performedBy);
+                        partyDocRepository.save(doc);
+                    }
+                });
+                // Fallback: surviving doc might also be stored by globalId
+                partyDocRepository.findByGlobalId(survivingGoldenId).ifPresent(doc -> {
+                    if (!survivingGoldenId.equals(doc.getGoldenRecordId())) {
+                        doc.setGoldenRecordId(survivingGoldenId);
+                        doc.setUpdatedAt(LocalDateTime.now());
+                        doc.setUpdatedBy(performedBy);
+                        partyDocRepository.save(doc);
+                    }
+                });
+            } catch (Exception e) {
+                log.warn("Cosmos merge step failed: {}", e.getMessage());
+            }
+        }
+
+        if (neo4jUpdated == 0 && cosmosUpdated == 0) {
+            log.error("mergeGoldenRecords: NO records found under mergedGoldenId={} in either store — " +
+                      "check that candidateIds on the task are golden record IDs, not global party IDs",
+                      mergedGoldenId);
+        }
+
         transactionLogService.logSuccess("PARTY", survivingGoldenId, "MERGE",
                 performedBy, System.currentTimeMillis() - start,
-                Map.of("mergedGoldenId", mergedGoldenId, "reason", reason != null ? reason : ""),
+                Map.of("mergedGoldenId", mergedGoldenId, "reason", reason != null ? reason : "",
+                       "neo4jUpdated", neo4jUpdated, "cosmosUpdated", cosmosUpdated),
                 Map.of("survivingGoldenId", survivingGoldenId));
-        log.info("Merged golden {} into {}", mergedGoldenId, survivingGoldenId);
+        log.info("Merge complete: golden {} → {} (neo4j={} cosmos={})",
+                mergedGoldenId, survivingGoldenId, neo4jUpdated, cosmosUpdated);
+
+        // ── 3. Publish real-time event ────────────────────────────────────────
+        try {
+            eventPublisher.publishEvent(AverioMdmEvent.builder()
+                    .eventId(UUID.randomUUID().toString())
+                    .eventType(AverioMdmEvent.PARTY_AUTO_MERGED)
+                    .domain("PARTY")
+                    .entityId(survivingGoldenId)
+                    .tenantId("default")
+                    .metadata(Map.of(
+                        "survivingGoldenId", survivingGoldenId,
+                        "mergedGoldenId",    mergedGoldenId,
+                        "reason",            reason != null ? reason : "",
+                        "performedBy",       performedBy,
+                        "neo4jUpdated",      String.valueOf(neo4jUpdated),
+                        "cosmosUpdated",     String.valueOf(cosmosUpdated)))
+                    .timestamp(Instant.now())
+                    .build());
+        } catch (Exception e) {
+            log.warn("Failed to publish PARTY_AUTO_MERGED event: {}", e.getMessage());
+        }
+    }
+
+    /** Returns the lower of two golden IDs — numeric comparison when both are all-digits. */
+    private static String lowerGoldenId(String a, String b) {
+        if (a == null) return b != null ? b : "";
+        if (b == null) return a;
+        try {
+            return new java.math.BigDecimal(a).compareTo(new java.math.BigDecimal(b)) <= 0 ? a : b;
+        } catch (NumberFormatException e) {
+            return a.compareTo(b) <= 0 ? a : b;
+        }
     }
 
     @Transactional("transactionManager")

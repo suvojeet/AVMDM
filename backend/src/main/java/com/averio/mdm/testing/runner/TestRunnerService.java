@@ -53,6 +53,12 @@ public class TestRunnerService {
     @Autowired(required = false)
     private MLTrainingTestSuite mlTrainingTestSuite;
 
+    @Autowired(required = false)
+    private StewardOperationsTestSuite stewardOperationsTestSuite;
+
+    @Autowired(required = false)
+    private SurvivorshipRulesTestSuite survivorshipRulesTestSuite;
+
     // For cleanup of regression data
     @Autowired(required = false)
     private PartyRepository partyRepository;
@@ -355,14 +361,16 @@ public class TestRunnerService {
 
     private List<AbstractTestSuite> availableSuites() {
         List<AbstractTestSuite> suites = new ArrayList<>();
-        if (apiHealthTestSuite      != null) suites.add(apiHealthTestSuite);
-        if (matchingTestSuite       != null) suites.add(matchingTestSuite);
-        if (blockingTestSuite       != null) suites.add(blockingTestSuite);
-        if (survivorshipTestSuite   != null) suites.add(survivorshipTestSuite);
-        if (goldenRecordTestSuite   != null) suites.add(goldenRecordTestSuite);
-        if (timelineTestSuite       != null) suites.add(timelineTestSuite);
-        if (mlTrainingTestSuite     != null) suites.add(mlTrainingTestSuite);
-        if (regressionScenarioSuite != null) suites.add(regressionScenarioSuite);
+        if (apiHealthTestSuite          != null) suites.add(apiHealthTestSuite);
+        if (matchingTestSuite           != null) suites.add(matchingTestSuite);
+        if (blockingTestSuite           != null) suites.add(blockingTestSuite);
+        if (survivorshipTestSuite       != null) suites.add(survivorshipTestSuite);
+        if (survivorshipRulesTestSuite  != null) suites.add(survivorshipRulesTestSuite);
+        if (goldenRecordTestSuite       != null) suites.add(goldenRecordTestSuite);
+        if (timelineTestSuite           != null) suites.add(timelineTestSuite);
+        if (mlTrainingTestSuite         != null) suites.add(mlTrainingTestSuite);
+        if (stewardOperationsTestSuite  != null) suites.add(stewardOperationsTestSuite);
+        if (regressionScenarioSuite     != null) suites.add(regressionScenarioSuite);
         return suites;
     }
 
@@ -375,7 +383,8 @@ public class TestRunnerService {
 
     private List<String> allSuiteNames() {
         return List.of("ALL", "API_HEALTH", "MATCHING", "BLOCKING",
-                "SURVIVORSHIP", "GOLDEN_RECORD", "TIMELINE", "ML_TRAINING", "REGRESSION");
+                "SURVIVORSHIP", "SURVIVORSHIP_RULES", "GOLDEN_RECORD", "TIMELINE",
+                "ML_TRAINING", "STEWARD_OPS", "REGRESSION");
     }
 
     private Map<String, Object> buildEnvironment() {

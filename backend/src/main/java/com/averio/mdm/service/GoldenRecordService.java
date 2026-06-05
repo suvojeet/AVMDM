@@ -9,7 +9,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
@@ -58,13 +57,26 @@ public class GoldenRecordService {
     }
 
     public void markMerged(String mergedGoldenId, String survivingGoldenId, String reason, String performedBy) {
-        List<Party> mergedParties = partyRepository.findByGoldenRecordId(mergedGoldenId);
-        mergedParties.forEach(p -> {
-            p.setStatus("MERGED");
-            p.setUpdatedAt(LocalDateTime.now());
-            p.setUpdatedBy(performedBy);
-        });
-        partyRepository.saveAll(mergedParties);
+        // The caller (PartyService.mergeGoldenRecords) already re-pointed the losing sources
+        // to survivingGoldenId and set status=MERGED in the same saveAll — so querying by
+        // mergedGoldenId here would return nothing.  We query by survivingGoldenId instead
+        // and mark any source that still carries the old mergedGoldenId as a cross-check.
+        List<Party> allSurviving = partyRepository.findByGoldenRecordId(survivingGoldenId);
+        boolean anyUpdated = false;
+        for (Party p : allSurviving) {
+            // Sources that came from the losing cluster haven't had status=MERGED yet if
+            // they were saved by a different transaction context — set it defensively.
+            if ("MERGED".equals(p.getStatus())) continue;
+            // Only mark non-golden sources as MERGED (the golden representative stays ACTIVE)
+            if (Boolean.TRUE.equals(p.getIsGolden())) continue;
+            // If this source was recently migrated (updatedBy == performedBy) mark it MERGED
+            if (performedBy.equals(p.getUpdatedBy())) {
+                p.setStatus("MERGED");
+                anyUpdated = true;
+            }
+        }
+        if (anyUpdated) partyRepository.saveAll(allSurviving);
+        log.info("markMerged: golden {} consumed into {} by {}", mergedGoldenId, survivingGoldenId, performedBy);
     }
 
     private void updateGoldenNode(List<Party> sources, GoldenRecord golden) {

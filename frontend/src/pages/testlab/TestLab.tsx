@@ -3,13 +3,14 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Navigate } from "react-router-dom";
 import {
   FlaskConical, Play, RotateCw, CheckCircle2, XCircle, AlertTriangle,
-  MinusCircle, ChevronDown, ChevronRight, Trash2, Clock, Zap,
+  MinusCircle, ChevronDown, ChevronRight, Trash2, Zap,
   Activity, History, CalendarClock, ShieldCheck, Cpu,
+  ClipboardCheck, Download, RefreshCw, PackageCheck, PackageX, TriangleAlert,
 } from "lucide-react";
 import clsx from "clsx";
 import {
   testLabApi, TestRun, TestResult, SuiteInfo, RunStatus, TestStatus,
-  AutomationStatus,
+  AutomationStatus, HealthReport, ReportComponent, ComponentStatus, OverallStatus,
 } from "../../api/testLabApi";
 import { useAuthStore } from "../../store/authStore";
 import { formatDate } from "../../utils/dateUtils";
@@ -379,6 +380,247 @@ function LiveProgressBar({ elapsed }: { elapsed: number }) {
   );
 }
 
+// ── Health Report ──────────────────────────────────────────────────────────────
+
+const COMPONENT_STATUS_CONFIG: Record<ComponentStatus, { label: string; icon: React.ElementType; cls: string; dot: string }> = {
+  HEALTHY:     { label: "Healthy",     icon: CheckCircle2,  cls: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30", dot: "bg-emerald-400" },
+  DEGRADED:    { label: "Degraded",    icon: AlertTriangle, cls: "text-amber-400   bg-amber-500/10   border-amber-500/30",   dot: "bg-amber-400"   },
+  CRITICAL:    { label: "Critical",    icon: XCircle,       cls: "text-red-400     bg-red-500/10     border-red-500/30",     dot: "bg-red-400"     },
+  UNAVAILABLE: { label: "Unavailable", icon: MinusCircle,   cls: "text-slate-400   bg-slate-500/10   border-slate-500/30",   dot: "bg-slate-500"   },
+  NOT_RUN:     { label: "Not Run",     icon: MinusCircle,   cls: "text-slate-500   bg-slate-800/50   border-slate-700/50",   dot: "bg-slate-600"   },
+};
+
+const OVERALL_CONFIG: Record<OverallStatus, { icon: React.ElementType; cls: string; bg: string; label: string }> = {
+  READY:     { icon: PackageCheck,  cls: "text-emerald-400", bg: "from-emerald-500/10 to-emerald-500/5 border-emerald-500/30", label: "SHIP READY" },
+  CAUTION:   { icon: TriangleAlert, cls: "text-amber-400",   bg: "from-amber-500/10  to-amber-500/5  border-amber-500/30",   label: "REVIEW NEEDED" },
+  NOT_READY: { icon: PackageX,      cls: "text-red-400",     bg: "from-red-500/10    to-red-500/5    border-red-500/30",     label: "NOT READY" },
+};
+
+const SUITE_LABEL: Record<string, string> = {
+  API_HEALTH:   "Infrastructure & Connectivity",
+  MATCHING:     "Entity Matching Engine",
+  BLOCKING:     "Blocking & Indexing",
+  SURVIVORSHIP: "Survivorship Engine",
+  GOLDEN_RECORD:"Golden Record Service",
+  TIMELINE:     "Timeline & Audit",
+  ML_TRAINING:  "ML Training Pipeline",
+  REGRESSION:   "End-to-End Regression",
+};
+
+function ComponentRow({ comp }: { comp: ReportComponent }) {
+  const cfg = COMPONENT_STATUS_CONFIG[comp.status] ?? COMPONENT_STATUS_CONFIG.NOT_RUN;
+  const Icon = cfg.icon;
+  const [open, setOpen] = useState(false);
+  const hasFailures = comp.criticalFailures.length > 0;
+
+  return (
+    <>
+      <tr
+        className={clsx("border-b border-aq-border/30 transition-colors", hasFailures && "cursor-pointer hover:bg-aq-border/10")}
+        onClick={() => hasFailures && setOpen(!open)}
+      >
+        <td className="px-4 py-3">
+          <div className="flex items-center gap-2">
+            {hasFailures
+              ? open ? <ChevronDown size={12} className="text-aq-dim flex-shrink-0" /> : <ChevronRight size={12} className="text-aq-dim flex-shrink-0" />
+              : <span className="w-3" />}
+            <div>
+              <p className="text-sm font-medium text-aq-text">{SUITE_LABEL[comp.name] ?? comp.name}</p>
+              <p className="text-[10px] text-aq-dim font-mono">{comp.name}</p>
+            </div>
+          </div>
+        </td>
+        <td className="px-4 py-3">
+          <span className={clsx("inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-bold border", cfg.cls)}>
+            <span className={clsx("w-1.5 h-1.5 rounded-full", cfg.dot)} />
+            <Icon size={10} />
+            {cfg.label}
+          </span>
+        </td>
+        <td className="px-4 py-3 text-center">
+          {comp.status !== "NOT_RUN" ? (
+            <div className="flex flex-col items-center gap-1">
+              <span className={clsx("text-sm font-bold tabular-nums", passRateColor(comp.passRate))}>
+                {comp.passRate.toFixed(1)}%
+              </span>
+              <div className="w-16 h-1 rounded-full bg-aq-border/40 overflow-hidden">
+                <div
+                  className={clsx("h-full rounded-full", comp.passRate >= 95 ? "bg-emerald-500" : comp.passRate >= 75 ? "bg-amber-500" : "bg-red-500")}
+                  style={{ width: `${comp.passRate}%` }}
+                />
+              </div>
+            </div>
+          ) : <span className="text-aq-dim text-xs">—</span>}
+        </td>
+        <td className="px-4 py-3 text-center text-xs tabular-nums">
+          {comp.status !== "NOT_RUN" ? (
+            <span className="text-aq-text">{comp.passed}<span className="text-aq-dim">/{comp.total}</span></span>
+          ) : <span className="text-aq-dim">—</span>}
+        </td>
+        <td className="px-4 py-3 text-center text-xs tabular-nums">
+          {comp.failed > 0 ? <span className="text-red-400 font-bold">{comp.failed}</span> : <span className="text-aq-dim/50">0</span>}
+          {comp.errors > 0 && <span className="text-amber-400 font-bold ml-1">+{comp.errors}err</span>}
+        </td>
+        <td className="px-4 py-3 text-right text-xs text-aq-dim tabular-nums">
+          {comp.durationMs > 0 ? fmtDuration(comp.durationMs) : "—"}
+        </td>
+      </tr>
+      {open && hasFailures && (
+        <tr className="border-b border-aq-border/30 bg-red-500/5">
+          <td colSpan={6} className="px-8 py-2">
+            <p className="text-[10px] font-semibold text-red-400 uppercase tracking-wide mb-1.5">Failing Tests</p>
+            <div className="flex flex-wrap gap-1.5">
+              {comp.criticalFailures.map((f) => (
+                <span key={f} className="text-[10px] font-mono bg-red-500/10 text-red-300 border border-red-500/20 px-2 py-0.5 rounded">
+                  {f}
+                </span>
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+function HealthReportPanel({ report, onRefresh, refreshing }: {
+  report: HealthReport;
+  onRefresh: () => void;
+  refreshing: boolean;
+}) {
+  const overall = OVERALL_CONFIG[report.overallStatus];
+  const OIcon = overall.icon;
+  const score = report.readinessScore;
+
+  const handleExport = () => {
+    const lines: string[] = [
+      "=".repeat(60),
+      "  AVERIO MDM — PRE-SALES HEALTH REPORT",
+      "=".repeat(60),
+      `  Generated : ${new Date(report.generatedAt).toLocaleString()}`,
+      `  Status    : ${report.overallStatus}`,
+      `  Score     : ${score}%`,
+      `  Verdict   : ${report.shipVerdict}`,
+      "",
+      "COMPONENT HEALTH",
+      "-".repeat(60),
+      ...report.components.map((c) =>
+        `  ${(SUITE_LABEL[c.name] ?? c.name).padEnd(30)} ${c.status.padEnd(12)} ${c.status !== "NOT_RUN" ? `${c.passRate.toFixed(1)}%  (${c.passed}/${c.total})` : "NOT RUN"}`
+      ),
+      "",
+      "SUMMARY",
+      "-".repeat(60),
+      `  Total Tests  : ${report.summary.totalTests}`,
+      `  Passed       : ${report.summary.totalPassed}`,
+      `  Failed       : ${report.summary.totalFailed}`,
+      `  Errors       : ${report.summary.totalErrors}`,
+      `  Skipped      : ${report.summary.totalSkipped}`,
+      `  Suites Run   : ${report.summary.suitesRun} / ${report.summary.suitesTotal}`,
+      "",
+      "FAILING TESTS",
+      "-".repeat(60),
+      ...report.components.flatMap((c) =>
+        c.criticalFailures.map((f) => `  [${c.name}] ${f}`)
+      ).concat(
+        report.components.every((c) => c.criticalFailures.length === 0) ? ["  None — all tests passed."] : []
+      ),
+      "",
+      "=".repeat(60),
+    ];
+    const blob = new Blob([lines.join("\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `averio-health-report-${new Date().toISOString().slice(0, 10)}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <div className="flex flex-col gap-5">
+      {/* Verdict banner */}
+      <div className={clsx("rounded-2xl border bg-gradient-to-br p-5 flex items-center gap-4", overall.bg)}>
+        <div className={clsx("w-14 h-14 rounded-2xl flex items-center justify-center bg-black/20 flex-shrink-0")}>
+          <OIcon size={28} className={overall.cls} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className={clsx("text-xl font-extrabold tracking-tight", overall.cls)}>{overall.label}</p>
+          <p className="text-sm text-aq-text mt-0.5">{report.shipVerdict}</p>
+          <p className="text-[10px] text-aq-dim mt-1">
+            Generated {new Date(report.generatedAt).toLocaleString()}
+          </p>
+        </div>
+        <div className="text-right flex-shrink-0">
+          <p className={clsx("text-4xl font-black tabular-nums", passRateColor(score))}>{score.toFixed(1)}<span className="text-xl">%</span></p>
+          <p className="text-[10px] text-aq-dim mt-0.5">Readiness Score</p>
+        </div>
+      </div>
+
+      {/* Summary pills */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <StatPill label="Suites Run"  value={`${report.summary.suitesRun}/${report.summary.suitesTotal}`} />
+        <StatPill label="Total Tests" value={report.summary.totalTests} />
+        <StatPill label="Passed"      value={report.summary.totalPassed}  cls="text-emerald-400" />
+        <StatPill label="Failed"      value={report.summary.totalFailed}  cls={report.summary.totalFailed  > 0 ? "text-red-400"   : "text-aq-dim"} />
+        <StatPill label="Errors"      value={report.summary.totalErrors}  cls={report.summary.totalErrors  > 0 ? "text-amber-400" : "text-aq-dim"} />
+        <StatPill label="Skipped"     value={report.summary.totalSkipped} cls={report.summary.totalSkipped > 0 ? "text-slate-300" : "text-aq-dim"} />
+        <div className="ml-auto flex gap-2">
+          <button
+            onClick={onRefresh}
+            disabled={refreshing}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                       text-aq-dim border border-aq-border/50 hover:text-aq-text hover:border-aq-border
+                       disabled:opacity-40 transition-colors"
+          >
+            <RefreshCw size={12} className={clsx(refreshing && "animate-spin")} />
+            Refresh
+          </button>
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium
+                       text-violet-400 border border-violet-500/30 bg-violet-500/5
+                       hover:bg-violet-500/10 transition-colors"
+          >
+            <Download size={12} />
+            Export .txt
+          </button>
+        </div>
+      </div>
+
+      {/* Component table */}
+      <div className="border border-aq-border/50 rounded-xl overflow-hidden">
+        <div className="px-4 py-2.5 border-b border-aq-border/40 bg-aq-dark/40 flex items-center gap-2">
+          <ShieldCheck size={13} className="text-aq-dim" />
+          <span className="text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Component Health</span>
+        </div>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-aq-border/40 bg-aq-dark/20">
+              <th className="px-4 py-2 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-wide">Component</th>
+              <th className="px-4 py-2 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-wide w-32">Status</th>
+              <th className="px-4 py-2 text-center text-[10px] font-semibold text-aq-dim uppercase tracking-wide w-28">Pass Rate</th>
+              <th className="px-4 py-2 text-center text-[10px] font-semibold text-aq-dim uppercase tracking-wide w-24">Tests</th>
+              <th className="px-4 py-2 text-center text-[10px] font-semibold text-aq-dim uppercase tracking-wide w-24">Failures</th>
+              <th className="px-4 py-2 text-right text-[10px] font-semibold text-aq-dim uppercase tracking-wide w-20">Duration</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.components.map((comp) => (
+              <ComponentRow key={comp.name} comp={comp} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Footer note */}
+      <p className="text-[10px] text-aq-dim/60 text-center">
+        This report is based on the most recent test run per component.
+        Run all suites before generating a delivery report.
+      </p>
+    </div>
+  );
+}
+
 // ── Main page ──────────────────────────────────────────────────────────────────
 
 const SUITE_DESCRIPTIONS: Record<string, string> = {
@@ -404,6 +646,7 @@ export default function TestLab() {
   // ── All hooks must run unconditionally before any early return ────────────
 
   const [selectedSuite, setSelectedSuite] = useState("ALL");
+  const [rightTab, setRightTab] = useState<"results" | "report">("results");
   // activeRun held directly in state — never derived from recentRuns so refetches can't wipe it
   const [activeRun, setActiveRun] = useState<TestRun | null>(null);
   const triggeredByRef = useRef<string>(user?.username ?? "admin");
@@ -432,6 +675,13 @@ export default function TestLab() {
     queryFn: testLabApi.getAutomationStatus,
     staleTime: 60_000,
     refetchInterval: 60_000,
+  });
+
+  const { data: healthReport, isFetching: reportFetching, refetch: refetchReport } = useQuery<HealthReport>({
+    queryKey: ["test-lab-report"],
+    queryFn: testLabApi.getHealthReport,
+    enabled: rightTab === "report",
+    staleTime: 0,
   });
 
   // Lightweight status poll while an async run is RUNNING
@@ -646,20 +896,79 @@ export default function TestLab() {
           </div>
         </div>
 
-        {/* ── Right: results ─────────────────────────────────────────────── */}
+        {/* ── Right: results / report ────────────────────────────────────── */}
         <div className="flex-1 min-w-0 bg-aq-card border border-aq-border/50 rounded-xl flex flex-col overflow-hidden">
-          {(isPolling || isSyncPending) ? (
-            <RunningPlaceholder suite={selectedSuite} elapsed={pollingElapsed} />
-          ) : displayRun ? (
-            <div className="flex-1 overflow-y-auto p-6">
-              <ResultsPanel
-                run={displayRun}
-                onCleanup={() => cleanupMutation.mutate(displayRun.testRunId)}
-                cleaning={cleanupMutation.isPending}
-              />
-            </div>
+          {/* Tab bar */}
+          <div className="flex items-center gap-1 px-4 py-2 border-b border-aq-border/40 bg-aq-dark/30 flex-shrink-0">
+            <button
+              onClick={() => setRightTab("results")}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                rightTab === "results" ? "bg-aq-border/40 text-aq-text" : "text-aq-muted hover:text-aq-text"
+              )}
+            >
+              <FlaskConical size={12} /> Test Results
+            </button>
+            <button
+              onClick={() => setRightTab("report")}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors",
+                rightTab === "report" ? "bg-violet-500/15 text-violet-300 border border-violet-500/25" : "text-aq-muted hover:text-aq-text"
+              )}
+            >
+              <ClipboardCheck size={12} /> Health Report
+            </button>
+          </div>
+
+          {rightTab === "results" ? (
+            (isPolling || isSyncPending) ? (
+              <RunningPlaceholder suite={selectedSuite} elapsed={pollingElapsed} />
+            ) : displayRun ? (
+              <div className="flex-1 overflow-y-auto p-6">
+                <ResultsPanel
+                  run={displayRun}
+                  onCleanup={() => cleanupMutation.mutate(displayRun.testRunId)}
+                  cleaning={cleanupMutation.isPending}
+                />
+              </div>
+            ) : (
+              <EmptyState onRun={handleRun} />
+            )
           ) : (
-            <EmptyState onRun={handleRun} />
+            /* Health Report tab */
+            reportFetching && !healthReport ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-4">
+                <div className="w-10 h-10 rounded-full border-2 border-violet-500/30 animate-spin border-t-violet-500" />
+                <p className="text-sm text-aq-dim">Generating health report…</p>
+              </div>
+            ) : healthReport ? (
+              <div className="flex-1 overflow-y-auto p-6">
+                <HealthReportPanel
+                  report={healthReport}
+                  onRefresh={() => refetchReport()}
+                  refreshing={reportFetching}
+                />
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 text-center">
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center
+                                bg-gradient-to-br from-violet-500/15 to-indigo-500/15 border border-violet-500/20">
+                  <ClipboardCheck size={24} className="text-violet-400/60" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-aq-text">No test data yet</p>
+                  <p className="text-xs text-aq-dim mt-1">Run all suites first, then come back to generate the health report.</p>
+                </div>
+                <button
+                  onClick={() => { setRightTab("results"); handleRun(); }}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500
+                             text-white text-sm font-semibold transition-colors shadow-lg shadow-violet-900/40"
+                >
+                  <Zap size={14} />
+                  Run All Suites First
+                </button>
+              </div>
+            )
           )}
         </div>
       </div>

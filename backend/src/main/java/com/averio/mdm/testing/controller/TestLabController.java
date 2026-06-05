@@ -1,5 +1,6 @@
 package com.averio.mdm.testing.controller;
 
+import com.averio.mdm.testing.domain.TestResult;
 import com.averio.mdm.testing.domain.TestRun;
 import com.averio.mdm.testing.runner.TestAsyncExecutor;
 import com.averio.mdm.testing.runner.TestRunnerService;
@@ -12,8 +13,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * REST API for the Averio MDM Test Laboratory.
@@ -178,21 +181,201 @@ public class TestLabController {
     }
 
     /**
+     * GET /api/v1/test-lab/report
+     *
+     * Generates a pre-sales health report from the most recent completed test runs.
+     * For each suite finds the latest non-RUNNING run; aggregates into a per-component
+     * status table, computes an overall readiness score, and emits a ship-ready verdict.
+     *
+     * Response shape:
+     * {
+     *   generatedAt: ISO string,
+     *   overallStatus: "READY" | "CAUTION" | "NOT_READY",
+     *   readinessScore: 0-100,
+     *   shipVerdict: "...",
+     *   components: [ { name, status, passRate, passed, total, failed, errors, skipped,
+     *                   durationMs, runId, runAt, criticalFailures: [testName] } ],
+     *   summary: { totalTests, totalPassed, totalFailed, totalErrors, totalSkipped },
+     *   environment: { ... }
+     * }
+     */
+    @GetMapping("/report")
+    @Operation(summary = "Generate pre-sales health report",
+               description = "Builds a component-level health report from the most recent test runs "
+                           + "and produces an overall ship-readiness verdict.")
+    public ResponseEntity<Map<String, Object>> getHealthReport() {
+        List<String> suiteNames = List.of(
+                "API_HEALTH", "MATCHING", "BLOCKING",
+                "SURVIVORSHIP", "SURVIVORSHIP_RULES",
+                "GOLDEN_RECORD", "TIMELINE", "ML_TRAINING",
+                "STEWARD_OPS", "REGRESSION");
+
+        // Collect the latest completed (non-RUNNING) run per suite
+        List<TestRun> recentRuns = testRunnerService.getRecentRuns(200);
+
+        java.util.LinkedHashMap<String, TestRun> latestPerSuite = new java.util.LinkedHashMap<>(); // LinkedHashMap preserves suite order
+        for (String s : suiteNames) {
+            recentRuns.stream()
+                    .filter(r -> s.equalsIgnoreCase(r.getSuiteName()) && !"RUNNING".equals(r.getStatus()))
+                    .findFirst()
+                    .ifPresent(r -> latestPerSuite.put(s, r));
+        }
+        // Also check if there is a recent ALL run that covers everything
+        recentRuns.stream()
+                .filter(r -> "ALL".equalsIgnoreCase(r.getSuiteName()) && !"RUNNING".equals(r.getStatus()))
+                .findFirst()
+                .ifPresent(allRun -> {
+                    if (allRun.getResults() != null) {
+                        Map<String, List<TestResult>> bySuite =
+                            allRun.getResults().stream()
+                                .collect(Collectors.groupingBy(
+                                    r -> r.getSuiteName() != null ? r.getSuiteName() : "UNKNOWN"));
+                        for (String s : suiteNames) {
+                            if (!latestPerSuite.containsKey(s) && bySuite.containsKey(s)) {
+                                // synthesise a virtual run entry from the ALL run results
+                                List<TestResult> sub = bySuite.get(s);
+                                int p = (int) sub.stream().filter(r -> "PASS".equals(r.getStatus())).count();
+                                int f = (int) sub.stream().filter(r -> "FAIL".equals(r.getStatus())).count();
+                                int e = (int) sub.stream().filter(r -> "ERROR".equals(r.getStatus())).count();
+                                int sk = (int) sub.stream().filter(r -> "SKIPPED".equals(r.getStatus())).count();
+                                TestRun virtual = TestRun.builder()
+                                        .testRunId(allRun.getTestRunId())
+                                        .suiteName(s)
+                                        .status(f > 0 || e > 0 ? (p == 0 ? "FAILED" : "PARTIAL") : "PASSED")
+                                        .totalTests(sub.size()).passedTests(p).failedTests(f)
+                                        .errorTests(e).skippedTests(sk)
+                                        .passRate(sub.isEmpty() ? 0 : (double) p / sub.size())
+                                        .results(sub)
+                                        .startedAt(allRun.getStartedAt())
+                                        .completedAt(allRun.getCompletedAt())
+                                        .totalDurationMs(allRun.getTotalDurationMs())
+                                        .build();
+                                latestPerSuite.put(s, virtual);
+                            }
+                        }
+                    }
+                });
+
+        // Build per-component entries
+        List<Map<String, Object>> components = new ArrayList<>();
+        int totalTests = 0, totalPassed = 0, totalFailed = 0, totalErrors = 0, totalSkipped = 0;
+
+        for (String suite : suiteNames) {
+            TestRun run = latestPerSuite.get(suite);
+            Map<String, Object> comp = new java.util.LinkedHashMap<>(); // LinkedHashMap keeps field order consistent
+            comp.put("name", suite);
+
+            if (run == null) {
+                comp.put("status", "NOT_RUN");
+                comp.put("passRate", 0);
+                comp.put("passed", 0);
+                comp.put("total", 0);
+                comp.put("failed", 0);
+                comp.put("errors", 0);
+                comp.put("skipped", 0);
+                comp.put("durationMs", 0);
+                comp.put("runId", null);
+                comp.put("runAt", null);
+                comp.put("criticalFailures", List.of());
+            } else {
+                double rate = run.getPassRate() * 100;
+                String compStatus = "PASSED".equals(run.getStatus()) ? "HEALTHY"
+                        : "PARTIAL".equals(run.getStatus()) ? "DEGRADED"
+                        : "FAILED".equals(run.getStatus()) ? "CRITICAL"
+                        : run.getStatus();
+                // If all tests skipped — mark as UNAVAILABLE
+                if (run.getSkippedTests() > 0 && run.getTotalTests() == run.getSkippedTests()) {
+                    compStatus = "UNAVAILABLE";
+                }
+                List<String> criticalFailures = run.getResults() == null ? List.of()
+                        : run.getResults().stream()
+                              .filter(r -> "FAIL".equals(r.getStatus()) || "ERROR".equals(r.getStatus()))
+                              .map(TestResult::getTestName)
+                              .collect(Collectors.toList());
+
+                comp.put("status", compStatus);
+                comp.put("passRate", Math.round(rate * 10.0) / 10.0);
+                comp.put("passed", run.getPassedTests());
+                comp.put("total", run.getTotalTests());
+                comp.put("failed", run.getFailedTests());
+                comp.put("errors", run.getErrorTests());
+                comp.put("skipped", run.getSkippedTests());
+                comp.put("durationMs", run.getTotalDurationMs());
+                comp.put("runId", run.getTestRunId());
+                comp.put("runAt", run.getCompletedAt() != null ? run.getCompletedAt().toString() : null);
+                comp.put("criticalFailures", criticalFailures);
+
+                totalTests   += run.getTotalTests();
+                totalPassed  += run.getPassedTests();
+                totalFailed  += run.getFailedTests();
+                totalErrors  += run.getErrorTests();
+                totalSkipped += run.getSkippedTests();
+            }
+            components.add(comp);
+        }
+
+        // Readiness score: weight by pass rate of run suites only
+        long testedSuites = components.stream().filter(c -> !"NOT_RUN".equals(c.get("status")) && !"UNAVAILABLE".equals(c.get("status"))).count();
+        double readinessScore = testedSuites == 0 ? 0
+                : components.stream()
+                    .filter(c -> !"NOT_RUN".equals(c.get("status")) && !"UNAVAILABLE".equals(c.get("status")))
+                    .mapToDouble(c -> ((Number) c.get("passRate")).doubleValue())
+                    .average().orElse(0);
+        readinessScore = Math.round(readinessScore * 10.0) / 10.0;
+
+        boolean hasCritical = components.stream().anyMatch(c -> "CRITICAL".equals(c.get("status")));
+        boolean hasDegraded = components.stream().anyMatch(c -> "DEGRADED".equals(c.get("status")));
+        boolean anyNotRun   = components.stream().anyMatch(c -> "NOT_RUN".equals(c.get("status")));
+
+        String overallStatus = hasCritical                   ? "NOT_READY"
+                             : readinessScore < 75           ? "NOT_READY"
+                             : hasDegraded || anyNotRun      ? "CAUTION"
+                             : readinessScore < 95           ? "CAUTION"
+                             :                                 "READY";
+
+        String verdict = switch (overallStatus) {
+            case "READY"     -> "All systems healthy. Product is ready for client delivery.";
+            case "CAUTION"   -> "Minor issues detected. Review degraded components before delivery.";
+            default          -> "Critical failures present. Do not ship until all CRITICAL components pass.";
+        };
+
+        Map<String, Object> report = new java.util.LinkedHashMap<>(); // ordered output
+        report.put("generatedAt",    java.time.LocalDateTime.now().toString());
+        report.put("overallStatus",  overallStatus);
+        report.put("readinessScore", readinessScore);
+        report.put("shipVerdict",    verdict);
+        report.put("components",     components);
+        report.put("summary", Map.of(
+                "totalTests",   totalTests,
+                "totalPassed",  totalPassed,
+                "totalFailed",  totalFailed,
+                "totalErrors",  totalErrors,
+                "totalSkipped", totalSkipped,
+                "suitesRun",    testedSuites,
+                "suitesTotal",  suiteNames.size()
+        ));
+
+        return ResponseEntity.ok(report);
+    }
+
+    /**
      * List available test suites with their descriptions.
      */
     @GetMapping("/suites")
     @Operation(summary = "List available test suites")
     public ResponseEntity<List<Map<String, String>>> listSuites() {
         List<Map<String, String>> suites = List.of(
-                Map.of("name", "ALL",          "description", "Run all available suites sequentially"),
-                Map.of("name", "API_HEALTH",   "description", "Connectivity and health checks for all repos and services"),
-                Map.of("name", "MATCHING",     "description", "Matching engine: exact, nickname, phonetic, typo-tolerance, false-positive"),
-                Map.of("name", "BLOCKING",     "description", "Blocking key generation, indexing, candidate lookup, and removal"),
-                Map.of("name", "SURVIVORSHIP", "description", "Golden record construction and survivorship rule application"),
-                Map.of("name", "GOLDEN_RECORD","description", "Golden record service: creation, attributes, multi-source, ID consistency"),
-                Map.of("name", "TIMELINE",     "description", "Timeline event persistence, retrieval, ordering, and service integration"),
-                Map.of("name", "ML_TRAINING",  "description", "ML training pipeline: mode config, feature extraction, dedup, balancing, contradiction resolution"),
-                Map.of("name", "REGRESSION",   "description", "End-to-end ingest pipeline scenarios with full persistence and cleanup")
+                Map.of("name", "ALL",                "description", "Run all available suites sequentially"),
+                Map.of("name", "API_HEALTH",         "description", "Connectivity and health checks for all repos and services"),
+                Map.of("name", "MATCHING",           "description", "Matching engine: exact, nickname, phonetic, typo-tolerance, false-positive"),
+                Map.of("name", "BLOCKING",           "description", "Blocking key generation, indexing, candidate lookup, and removal"),
+                Map.of("name", "SURVIVORSHIP",       "description", "Golden record construction and survivorship rule application"),
+                Map.of("name", "SURVIVORSHIP_RULES", "description", "Survivorship rule correctness: SOURCE_PRIORITY case-insensitive, MOST_RECENT, NON_NULL, LONGEST, SUPREMACY"),
+                Map.of("name", "GOLDEN_RECORD",      "description", "Golden record service: creation, attributes, multi-source, ID consistency"),
+                Map.of("name", "TIMELINE",           "description", "Timeline event persistence, retrieval, ordering, and service integration"),
+                Map.of("name", "ML_TRAINING",        "description", "ML training pipeline: mode config, feature extraction, dedup, balancing, contradiction resolution"),
+                Map.of("name", "STEWARD_OPS",        "description", "Steward golden ID operations: merge, split, unlink, relink via Cosmos DB"),
+                Map.of("name", "REGRESSION",         "description", "End-to-end ingest pipeline scenarios with full persistence and cleanup")
         );
         return ResponseEntity.ok(suites);
     }

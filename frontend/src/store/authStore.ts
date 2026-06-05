@@ -3,7 +3,7 @@ import { persist } from "zustand/middleware";
 
 export interface User {
   username: string;
-  role: "ADMIN" | "STEWARD" | "VIEWER" | "TESTER";
+  role: "ADMIN" | "STEWARD" | "VIEWER" | "TESTER" | "PLATFORM_ADMIN";
   displayName: string;
   email: string;
   avatarInitials: string;
@@ -49,6 +49,17 @@ const DEMO_USERS: Record<string, { password: string; user: User }> = {
       avatarInitials: "QA",
     },
   },
+  // Averio internal — platform control plane access only
+  averio: {
+    password: "averio2026",
+    user: {
+      username: "averio",
+      role: "PLATFORM_ADMIN",
+      displayName: "Averio Platform Admin",
+      email: "platform@averio.internal",
+      avatarInitials: "AP",
+    },
+  },
 };
 
 export const useAuthStore = create<AuthState>()(
@@ -59,7 +70,6 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
 
       login: async (username: string, password: string) => {
-        // Simulate network latency
         await new Promise((r) => setTimeout(r, 800));
         const match = DEMO_USERS[username.toLowerCase()];
         if (match && match.password === password) {

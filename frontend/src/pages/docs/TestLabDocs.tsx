@@ -34,7 +34,7 @@ The module is divided into three layers:
 3. Frontend — a React dashboard at /test-lab for triggering runs, viewing results, and cleanup.
 
 ---
-TEST SUITES (7 suites + ALL):
+TEST SUITES (9 suites + ALL):
 
 1. API_HEALTH — Connectivity and health checks.
    Tests: Neo4j connectivity, Cosmos DB connectivity (3 repos), MatchingEngine empty pool,
@@ -54,21 +54,39 @@ TEST SUITES (7 suites + ALL):
 4. SURVIVORSHIP — Golden record construction:
    Tests: Single-source golden attributes, Most-recent survivorship rule, Confidence score > 0.
 
-5. GOLDEN_RECORD — Golden record service:
+5. SURVIVORSHIP_RULES — Survivorship rule correctness (in-memory, targeted):
+   Tests: SOURCE_PRIORITY exact-case match, SOURCE_PRIORITY case-insensitive match (e.g. "Trust" matches rule "TRUST"),
+          Lower priority number correctly loses, MOST_RECENT picks newest timestamp,
+          NON_NULL skips null values, LONGEST picks longest string,
+          SUPREMACY case-insensitive (e.g. "Core_Banking" matches "CORE_BANKING"),
+          Fallback to first non-null when no rule defined.
+   Note: This suite specifically validates the case-insensitive fix applied to SourcePriorityStrategy.
+
+6. GOLDEN_RECORD — Golden record service:
    Tests: Creation, attribute retrieval, multi-source survivorship, ID consistency.
 
-6. TIMELINE — Cosmos DB event persistence:
+7. TIMELINE — Cosmos DB event persistence:
    Tests: Persist and retrieve, recordUpdateEvent, retrieval by entityId, descending order.
    Note: Each test creates and cleans up its own data. Cleanup IDs are tracked per test.
 
-7. REGRESSION — End-to-end ingest pipeline with full persistence and cleanup:
-   Scenarios: CRM+ERP duplicate auto-link, Org legal suffix normalisation (end-to-end),
-              Review-zone steward task creation, Drift detection after party update,
-              Clean deduplication (no false positives).
-   Note: These tests call partyService.ingestParty() — they write real Neo4j + Cosmos data and clean up after.
+8. ML_TRAINING — ML training pipeline:
+   Tests: Mode config, feature extraction, dedup, balancing, contradiction resolution.
 
-ALL — Runs all 7 suites sequentially in this order:
-     API_HEALTH → MATCHING → BLOCKING → SURVIVORSHIP → GOLDEN_RECORD → TIMELINE → REGRESSION.
+9. STEWARD_OPS — Steward golden ID operations (Cosmos DB):
+   Tests: Merge re-points all sources to surviving golden ID, Split assigns each source a unique new golden ID,
+          Split on single-record cluster is idempotent, Unlink removes one source from cluster → new golden ID,
+          Relink moves one source to a different cluster (source=1 remains, target+1),
+          Relink preserves all source fields (firstName, lastName, taxId, sourceSystem unchanged).
+   Note: Tests write real Cosmos documents and clean them up via cleanupIds. Requires Cosmos connectivity.
+
+10. REGRESSION — End-to-end ingest pipeline with full persistence and cleanup:
+    Scenarios: CRM+ERP duplicate auto-link, Org legal suffix normalisation (end-to-end),
+               Review-zone steward task creation, Drift detection after party update,
+               Clean deduplication (no false positives).
+    Note: These tests call partyService.ingestParty() — they write real Neo4j + Cosmos data and clean up after.
+
+ALL — Runs all 9 suites sequentially:
+     API_HEALTH → MATCHING → BLOCKING → SURVIVORSHIP → SURVIVORSHIP_RULES → GOLDEN_RECORD → TIMELINE → ML_TRAINING → STEWARD_OPS → REGRESSION.
 
 ---
 SCORING / STATUS:
@@ -159,9 +177,10 @@ A: SKIPPED means a required dependency (Neo4j, Cosmos, blocking service, etc.) w
    Check your application-local.yml for correct connection strings, then restart the backend.
 
 Q: How long does a full ALL run take?
-A: API_HEALTH: 1–2s. MATCHING: 1–3s. BLOCKING: <1s. SURVIVORSHIP: 1–2s. GOLDEN_RECORD: 1–2s.
-   TIMELINE: 5–15s (Cosmos round trips). REGRESSION: 30–90s (full ingest pipeline with Neo4j writes).
-   Total for ALL: typically 45–120 seconds.
+A: API_HEALTH: 1–2s. MATCHING: 1–3s. BLOCKING: <1s. SURVIVORSHIP: 1–2s. SURVIVORSHIP_RULES: 1–2s.
+   GOLDEN_RECORD: 1–2s. TIMELINE: 5–15s (Cosmos round trips). ML_TRAINING: 2–5s.
+   STEWARD_OPS: 5–20s (Cosmos reads/writes for 6 tests). REGRESSION: 30–90s (Neo4j + Cosmos).
+   Total for ALL: typically 50–140 seconds.
 
 Q: Can I run tests in parallel?
 A: Not currently. TestRunnerService runs suites sequentially to avoid data contention.
@@ -478,7 +497,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "How long does a full ALL run take?",
-    a: "API_HEALTH: 1–2 seconds. MATCHING: 1–3 seconds. BLOCKING: under 1 second. SURVIVORSHIP: 1–2 seconds. GOLDEN_RECORD: 1–2 seconds. TIMELINE: 5–15 seconds (Cosmos round trips). REGRESSION: 30–90 seconds (full Neo4j + Cosmos ingest pipeline with cleanup). Total for ALL: typically 45 seconds to 2 minutes depending on database latency.",
+    a: "API_HEALTH: 1–2s. MATCHING: 1–3s. BLOCKING: <1s. SURVIVORSHIP: 1–2s. SURVIVORSHIP_RULES: 1–2s. GOLDEN_RECORD: 1–2s. TIMELINE: 5–15s (Cosmos round trips). ML_TRAINING: 2–5s. STEWARD_OPS: 5–20s (Cosmos reads/writes). REGRESSION: 30–90s (full Neo4j + Cosmos ingest pipeline with cleanup). Total for ALL: typically 50–140 seconds depending on database latency.",
   },
   {
     q: "I don't see Test Laboratory in the sidebar. How do I access it?",
@@ -486,7 +505,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "Can I run individual suites instead of ALL?",
-    a: "Yes. In the left panel of the Test Lab UI, click any suite name (API_HEALTH, MATCHING, BLOCKING, SURVIVORSHIP, GOLDEN_RECORD, TIMELINE, or REGRESSION) to select it, then click the Run button. You can also call the API directly: POST /api/v1/test-lab/run?suite=MATCHING. Individual suites are useful for debugging a specific area without waiting for the full regression run.",
+    a: "Yes. In the left panel of the Test Lab UI, click any suite name (API_HEALTH, MATCHING, BLOCKING, SURVIVORSHIP, SURVIVORSHIP_RULES, GOLDEN_RECORD, TIMELINE, ML_TRAINING, STEWARD_OPS, or REGRESSION) to select it, then click the Run button. You can also call the API directly: POST /api/v1/test-lab/run?suite=SURVIVORSHIP_RULES. Individual suites are useful for debugging a specific area without waiting for the full regression run.",
   },
   {
     q: "What is the difference between MATCHING and REGRESSION suites?",
@@ -620,8 +639,8 @@ export default function TestLabDocs() {
           {/* 3 — Suites */}
           <Section id="suites" title="Test Suites" icon={Layers} color="bg-indigo-600/80">
             <p>
-              Seven suites cover distinct functional areas. Select <strong>ALL</strong> to run every suite
-              sequentially (API_HEALTH → MATCHING → BLOCKING → SURVIVORSHIP → GOLDEN_RECORD → TIMELINE → REGRESSION),
+              Nine suites cover distinct functional areas. Select <strong>ALL</strong> to run every suite
+              sequentially (API_HEALTH → MATCHING → BLOCKING → SURVIVORSHIP → SURVIVORSHIP_RULES → GOLDEN_RECORD → TIMELINE → ML_TRAINING → STEWARD_OPS → REGRESSION),
               or pick any individual suite for a focused run.
             </p>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -673,6 +692,20 @@ export default function TestLabDocs() {
                 ]}
               />
               <SuiteCard
+                name="SURVIVORSHIP_RULES" icon={Shield} color="bg-orange-600/80" type="memory"
+                desc="Targeted rule correctness tests — validates the case-insensitive SOURCE_PRIORITY fix and all rule types."
+                tests={[
+                  "SOURCE_PRIORITY exact-case: BANKING wins over BROKERAGE",
+                  "SOURCE_PRIORITY case-insensitive: 'Trust' matches rule 'TRUST'",
+                  "Lower priority number correctly loses (priority 4 loses to priority 1)",
+                  "MOST_RECENT: newest timestamp wins",
+                  "NON_NULL: null values skipped",
+                  "LONGEST: longest string wins",
+                  "SUPREMACY case-insensitive: 'Core_Banking' matches 'CORE_BANKING'",
+                  "Fallback to first non-null when no rule defined",
+                ]}
+              />
+              <SuiteCard
                 name="GOLDEN_RECORD" icon={Database} color="bg-violet-600/80" type="cosmos"
                 desc="Golden record service: creation, attribute retrieval, multi-source."
                 tests={[
@@ -690,6 +723,18 @@ export default function TestLabDocs() {
                   "recordUpdateEvent helper",
                   "Retrieval by entityId",
                   "Descending chronological ordering",
+                ]}
+              />
+              <SuiteCard
+                name="STEWARD_OPS" icon={GitMerge} color="bg-rose-600/80" type="cosmos"
+                desc="Steward golden ID operations — merge, split, unlink, relink tested against real Cosmos documents."
+                tests={[
+                  "Merge: lower golden ID survives; all sources re-pointed",
+                  "Split: each record gets its own new distinct golden ID",
+                  "Split on single-record cluster is idempotent",
+                  "Unlink: target record leaves cluster with new golden ID",
+                  "Relink: record moves to target cluster (source−1, target+1)",
+                  "Relink preserves firstName, lastName, taxId, sourceSystem",
                 ]}
               />
               <SuiteCard

@@ -29,7 +29,8 @@ public class SourcePriorityStrategy {
 
     private AttributeCandidate selectByNumericPriority(List<AttributeCandidate> candidates,
                                                         List<Map<String, Object>> sourcePriorities) {
-        Map<String, Integer> priorityMap = new HashMap<>();
+        // Case-insensitive map so "Trust" matches rule entry "TRUST"
+        Map<String, Integer> priorityMap = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         for (Map<String, Object> entry : sourcePriorities) {
             Object src = entry.get("source");
             Object pri = entry.get("priority");
@@ -71,7 +72,7 @@ public class SourcePriorityStrategy {
         }
         for (String source : priorityOrder) {
             AttributeCandidate winner = candidates.stream()
-                    .filter(c -> source.equals(c.getSourceSystem()) && c.getValue() != null)
+                    .filter(c -> source.equalsIgnoreCase(c.getSourceSystem()) && c.getValue() != null)
                     .findFirst().orElse(null);
             if (winner != null) return winner;
         }

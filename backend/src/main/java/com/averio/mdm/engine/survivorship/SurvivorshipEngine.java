@@ -136,7 +136,7 @@ public class SurvivorshipEngine {
             }
             case "SUPREMACY" -> {
                 var winner = candidates.stream()
-                        .filter(c -> rule.getSupremacySourceSystem().equals(c.getSourceSystem()))
+                        .filter(c -> rule.getSupremacySourceSystem().equalsIgnoreCase(c.getSourceSystem()))
                         .filter(c -> c.getValue() != null)
                         .findFirst()
                         .orElse(mostRecentStrategy.select(candidates));

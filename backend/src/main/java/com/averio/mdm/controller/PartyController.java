@@ -8,6 +8,8 @@ import com.averio.mdm.domain.golden.GoldenRecord;
 import com.averio.mdm.domain.timeline.TimelineEvent;
 import com.averio.mdm.repository.cosmos.PartyDocRepository;
 import com.averio.mdm.service.GdprService;
+import com.averio.mdm.engine.survivorship.SurvivorshipEngine;
+import com.averio.mdm.service.GovernanceService;
 import com.averio.mdm.service.GoldenRecordService;
 import com.averio.mdm.service.PartyService;
 import com.averio.mdm.service.PartyPhotoService;
@@ -29,6 +31,7 @@ import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -45,6 +48,8 @@ public class PartyController {
 
     private final PartyService partyService;
     private final GoldenRecordService goldenRecordService;
+    private final GovernanceService governanceService;
+    private final SurvivorshipEngine survivorshipEngine;
     private final SearchService searchService;
     private final TimelineService timelineService;
     private final PartyPhotoService partyPhotoService;
@@ -110,13 +115,24 @@ public class PartyController {
             return gr != null ? ResponseEntity.ok(gr) : ResponseEntity.notFound().build();
         } catch (Exception e) {
             log.warn("Neo4j unavailable for golden-record {}: {}", globalId, e.getMessage());
-            // Cosmos fallback: find by globalId first, then scan for matching goldenRecordId
-            java.util.Optional<PartyDoc> doc = partyDocRepository.findById(globalId);
-            if (doc.isEmpty()) {
-                List<PartyDoc> all = new java.util.ArrayList<>();
-                partyDocRepository.findAll().forEach(all::add);
-                doc = all.stream().filter(d -> globalId.equals(d.getGoldenRecordId())).findFirst();
-            }
+            // Cosmos fallback: scan all docs to find any member of the golden cluster.
+            // The incoming id may be a globalId (P-xxx) or a goldenRecordId (numeric).
+            // We find any non-MERGED doc in the cluster and pass it to buildGoldenRecordFromDoc
+            // which will then fetch ALL cluster members and run SurvivorshipEngine on them.
+            List<PartyDoc> allDocs = new ArrayList<>();
+            partyDocRepository.findAll().forEach(allDocs::add);
+
+            java.util.Optional<PartyDoc> doc = allDocs.stream()
+                    .filter(d -> globalId.equals(d.getGlobalId())
+                             || globalId.equals(d.getGoldenRecordId()))
+                    .filter(d -> !"MERGED".equals(d.getStatus()))
+                    .findFirst()
+                    // fallback: include MERGED if that's all we have
+                    .or(() -> allDocs.stream()
+                            .filter(d -> globalId.equals(d.getGlobalId())
+                                     || globalId.equals(d.getGoldenRecordId()))
+                            .findFirst());
+
             return doc.map(this::buildGoldenRecordFromDoc)
                       .orElse(ResponseEntity.notFound().build());
         }
@@ -568,46 +584,135 @@ public class PartyController {
         }
     }
 
+    /**
+     * Builds a GoldenRecord for a Cosmos-backed cluster by:
+     * 1. Collecting ALL source docs that share the same goldenRecordId
+     * 2. Converting each PartyDoc → Party so SurvivorshipEngine can process them
+     * 3. Running the real governance survivorship rules — same path as Neo4j
+     *
+     * Falls back to single-doc construction only if the cluster scan fails.
+     */
     private ResponseEntity<GoldenRecord> buildGoldenRecordFromDoc(PartyDoc doc) {
-        if (doc.getGoldenRecordId() == null) return ResponseEntity.notFound().build();
+        String goldenRecordId = doc.getGoldenRecordId();
+        if (goldenRecordId == null || goldenRecordId.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+
+        try {
+            // Collect all source docs in the cluster via findAll() scan —
+            // avoids cross-partition findByGoldenRecordId which is unreliable
+            List<PartyDoc> allDocs = new ArrayList<>();
+            partyDocRepository.findAll().forEach(allDocs::add);
+
+            List<PartyDoc> clusterDocs = allDocs.stream()
+                    .filter(d -> goldenRecordId.equals(d.getGoldenRecordId())
+                              && !"MERGED".equals(d.getStatus()))
+                    .collect(java.util.stream.Collectors.toList());
+
+            // Always include the requested doc even if its goldenRecordId was just updated
+            if (clusterDocs.isEmpty()) clusterDocs.add(doc);
+
+            log.info("buildGoldenRecordFromDoc: goldenId={} clusterSize={}", goldenRecordId, clusterDocs.size());
+
+            // Convert PartyDoc → Party so SurvivorshipEngine can apply rules
+            List<com.averio.mdm.domain.entity.Party> sources = clusterDocs.stream()
+                    .map(this::partyDocToParty)
+                    .collect(java.util.stream.Collectors.toList());
+
+            // Run real survivorship rules from governance service
+            List<com.averio.mdm.domain.governance.SurvivorshipRule> rules =
+                    governanceService.getActiveSurvivorshipRules("PARTY");
+
+            GoldenRecord gr = survivorshipEngine.buildGoldenRecord(sources, rules, goldenRecordId);
+            if (gr == null) throw new RuntimeException("SurvivorshipEngine returned null");
+
+            // Enrich timing/count from the raw Cosmos docs
+            LocalDateTime firstSeen = clusterDocs.stream()
+                    .map(PartyDoc::getCreatedAt)
+                    .filter(Objects::nonNull)
+                    .min(java.util.Comparator.naturalOrder()).orElse(doc.getCreatedAt());
+            LocalDateTime lastUpdated = clusterDocs.stream()
+                    .map(PartyDoc::getUpdatedAt)
+                    .filter(Objects::nonNull)
+                    .max(java.util.Comparator.naturalOrder()).orElse(doc.getUpdatedAt());
+
+            gr = gr.toBuilder()
+                    .sourceCount(clusterDocs.size())
+                    .firstSeenAt(firstSeen)
+                    .lastUpdatedAt(lastUpdated)
+                    .build();
+
+            return ResponseEntity.ok(gr);
+
+        } catch (Exception e) {
+            log.warn("Survivorship fallback failed for goldenId={}, using single-doc: {}", goldenRecordId, e.getMessage());
+            // Last-resort: return raw single-doc attributes so the UI shows something
+            return buildGoldenRecordFromDocRaw(doc);
+        }
+    }
+
+    /** Converts a PartyDoc to a Party shell for use with SurvivorshipEngine. */
+    private com.averio.mdm.domain.entity.Party partyDocToParty(PartyDoc d) {
+        return com.averio.mdm.domain.entity.Party.builder()
+                .globalId(d.getGlobalId())
+                .goldenRecordId(d.getGoldenRecordId())
+                .partyType(d.getPartyType())
+                .status(d.getStatus())
+                .firstName(d.getFirstName())
+                .middleName(d.getMiddleName())
+                .lastName(d.getLastName())
+                .fullName(d.getFullName())
+                .organizationName(d.getOrganizationName())
+                .legalName(d.getLegalName())
+                .dateOfBirth(d.getDateOfBirth())
+                .gender(d.getGender())
+                .nationality(d.getNationality())
+                .taxId(d.getTaxId())
+                .ein(d.getEin())
+                .ssn(d.getSsn())
+                .dunsNumber(d.getDunsNumber())
+                .lei(d.getLei())
+                .sourceSystem(d.getSourceSystem())
+                .sourceSystemId(d.getSourceSystemId())
+                .confidenceScore(d.getConfidenceScore())
+                .dataQualityScore(d.getDataQualityScore())
+                .completenessScore(d.getCompletenessScore())
+                .matchScore(d.getMatchScore())
+                .createdAt(d.getCreatedAt())
+                .updatedAt(d.getUpdatedAt())
+                .build();
+    }
+
+    /** Raw single-doc fallback — used only when SurvivorshipEngine throws. */
+    private ResponseEntity<GoldenRecord> buildGoldenRecordFromDocRaw(PartyDoc doc) {
         Map<String, GoldenRecord.GoldenAttribute> attrs = new LinkedHashMap<>();
-        java.util.function.BiConsumer<String, Object> addAttr = (name, val) -> {
+        java.util.function.BiConsumer<String, Object> add = (name, val) -> {
             if (val != null) attrs.put(name, GoldenRecord.GoldenAttribute.builder()
                     .attributeName(name).value(val)
                     .winningSourceSystem(doc.getSourceSystem() != null ? doc.getSourceSystem() : "COSMOS")
                     .survivorshipRule("MOST_RECENT").confidenceScore(1.0).build());
         };
-        addAttr.accept("firstName",        doc.getFirstName());
-        addAttr.accept("middleName",       doc.getMiddleName());
-        addAttr.accept("lastName",         doc.getLastName());
-        addAttr.accept("fullName",         doc.getFullName());
-        addAttr.accept("preferredName",    doc.getPreferredName());
-        addAttr.accept("gender",           doc.getGender());
-        addAttr.accept("dateOfBirth",      doc.getDateOfBirth());
-        addAttr.accept("nationality",        doc.getNationality());
-        addAttr.accept("countryOfResidence", doc.getCountryOfResidence());
-        addAttr.accept("countryOfBirth",     doc.getCountryOfBirth());
-        addAttr.accept("organizationName",   doc.getOrganizationName());
-        addAttr.accept("legalName",        doc.getLegalName());
-        addAttr.accept("taxId",            doc.getTaxId());
-        addAttr.accept("dunsNumber",       doc.getDunsNumber());
-        addAttr.accept("sourceSystem",     doc.getSourceSystem());
-        addAttr.accept("sourceSystemId",   doc.getSourceSystemId());
-        GoldenRecord gr = GoldenRecord.builder()
+        add.accept("firstName",        doc.getFirstName());
+        add.accept("middleName",       doc.getMiddleName());
+        add.accept("lastName",         doc.getLastName());
+        add.accept("fullName",         doc.getFullName());
+        add.accept("preferredName",    doc.getPreferredName());
+        add.accept("gender",           doc.getGender());
+        add.accept("dateOfBirth",      doc.getDateOfBirth());
+        add.accept("nationality",      doc.getNationality());
+        add.accept("organizationName", doc.getOrganizationName());
+        add.accept("legalName",        doc.getLegalName());
+        add.accept("taxId",            doc.getTaxId());
+        add.accept("dunsNumber",       doc.getDunsNumber());
+        return ResponseEntity.ok(GoldenRecord.builder()
                 .goldenRecordId(doc.getGoldenRecordId())
-                .entityType("PARTY")
-                .entitySubType(doc.getPartyType())
-                .status(doc.getStatus())
-                .goldenAttributes(attrs)
+                .entityType("PARTY").entitySubType(doc.getPartyType())
+                .status(doc.getStatus()).goldenAttributes(attrs)
                 .overallConfidenceScore(doc.getConfidenceScore() != null ? doc.getConfidenceScore() : 1.0)
                 .dataQualityScore(doc.getDataQualityScore() != null ? doc.getDataQualityScore() : 0.0)
                 .completenessScore(doc.getCompletenessScore() != null ? doc.getCompletenessScore() : 0.0)
-                .sourceCount(1)
-                .firstSeenAt(doc.getCreatedAt())
-                .lastUpdatedAt(doc.getUpdatedAt())
-                .lastUpdatedBy(doc.getUpdatedBy())
-                .build();
-        return ResponseEntity.ok(gr);
+                .sourceCount(1).firstSeenAt(doc.getCreatedAt()).lastUpdatedAt(doc.getUpdatedAt())
+                .build());
     }
 
     // ── Address management endpoints ─────────────────────────────────────────

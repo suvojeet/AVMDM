@@ -291,7 +291,10 @@ export default function LoginPage() {
 
   useEffect(() => {
     setMounted(true);
-    if (isAuthenticated) navigate("/dashboard");
+    if (isAuthenticated) {
+      const { user } = useAuthStore.getState();
+      navigate(user?.role === "PLATFORM_ADMIN" ? "/platform" : "/dashboard");
+    }
   }, [isAuthenticated, navigate]);
 
   useParticleCanvas(canvasRef, mounted);
@@ -303,8 +306,10 @@ export default function LoginPage() {
     const ok = await login(username, password);
     setLoading(false);
     if (ok) {
-      toast.success("Welcome to Averio MDM!");
-      navigate("/dashboard");
+      // Pull fresh user from store after login
+      const { user } = useAuthStore.getState();
+      toast.success(user?.role === "PLATFORM_ADMIN" ? "Welcome to Averio Control Plane!" : "Welcome to Averio MDM!");
+      navigate(user?.role === "PLATFORM_ADMIN" ? "/platform" : "/dashboard");
     } else {
       setError("Invalid credentials. Use admin / admin to sign in.");
     }

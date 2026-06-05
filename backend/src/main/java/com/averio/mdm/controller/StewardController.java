@@ -1,15 +1,19 @@
 package com.averio.mdm.controller;
 
+import com.averio.mdm.domain.cosmos.PartyDoc;
 import com.averio.mdm.domain.entity.Party;
 import com.averio.mdm.domain.steward.StewardTask;
 import com.averio.mdm.engine.matching.MatchingEngine;
 import com.averio.mdm.engine.matching.ProbabilisticMatcher;
 import com.averio.mdm.engine.matching.DeterministicMatcher;
+import com.averio.mdm.repository.cosmos.PartyDocRepository;
 import com.averio.mdm.repository.neo4j.PartyRepository;
+import com.averio.mdm.service.GoldenRecordService;
 import com.averio.mdm.service.StewardService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -24,6 +28,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @RestController
 @RequestMapping("/api/v1/steward")
 @RequiredArgsConstructor
@@ -36,17 +41,27 @@ public class StewardController {
     private PartyRepository partyRepository;
 
     @Autowired(required = false)
+    private PartyDocRepository partyDocRepository;
+
+    @Autowired(required = false)
     private ProbabilisticMatcher probabilisticMatcher;
 
     @Autowired(required = false)
     private DeterministicMatcher deterministicMatcher;
 
     @GetMapping("/tasks")
-    @Operation(summary = "Get open steward tasks")
-    public ResponseEntity<List<StewardTask>> getTasks(
+    @Operation(summary = "Get open steward tasks — paginated with filters")
+    public ResponseEntity<Map<String, Object>> getTasks(
             @RequestParam(required = false) String priority,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String taskType,
+            @RequestParam(required = false) String search,
+            @RequestParam(defaultValue = "0")  int page,
+            @RequestParam(defaultValue = "50") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
             @AuthenticationPrincipal Jwt jwt) {
-        return ResponseEntity.ok(stewardService.getOpenTasks(priority));
+        return ResponseEntity.ok(stewardService.getTasksPaged(priority, status, taskType, search, page, size, sortBy, sortDir));
     }
 
     @GetMapping("/tasks/my")
@@ -141,14 +156,8 @@ public class StewardController {
         Party p1 = null, p2 = null;
         if (partyRepository != null) {
             try {
-                List<Party> p1List = sourceSystem1 != null
-                        ? partyRepository.findBySourceSystemAndSourceSystemId(sourceSystem1, sourceId1)
-                        : partyRepository.findBySourceSystemIdOnly(sourceId1);
-                List<Party> p2List = sourceSystem2 != null
-                        ? partyRepository.findBySourceSystemAndSourceSystemId(sourceSystem2, sourceId2)
-                        : partyRepository.findBySourceSystemIdOnly(sourceId2);
-                if (!p1List.isEmpty()) p1 = p1List.get(0);
-                if (!p2List.isEmpty()) p2 = p2List.get(0);
+                p1 = lookupPartyForReview(sourceId1, sourceSystem1);
+                p2 = lookupPartyForReview(sourceId2, sourceSystem2);
             } catch (Exception e) {
                 // Neo4j connection failure — continue without party data
             }
@@ -243,6 +252,34 @@ public class StewardController {
      * Creates a set of realistic demo steward tasks so the console is never empty.
      * Safe to call repeatedly — each call generates new UUIDs.
      */
+    @GetMapping("/source-systems")
+    @Operation(summary = "Return distinct source system names across all party records")
+    public ResponseEntity<List<String>> getSourceSystems() {
+        // Try Neo4j first, fall back to Cosmos
+        if (partyRepository != null) {
+            try {
+                List<String> systems = partyRepository.findAll().stream()
+                        .map(Party::getSourceSystem)
+                        .filter(s -> s != null && !s.isBlank())
+                        .distinct().sorted()
+                        .collect(java.util.stream.Collectors.toList());
+                if (!systems.isEmpty()) return ResponseEntity.ok(systems);
+            } catch (Exception ignored) { }
+        }
+        if (partyDocRepository != null) {
+            try {
+                List<String> systems = new ArrayList<>();
+                partyDocRepository.findAll().forEach(d -> {
+                    if (d.getSourceSystem() != null && !d.getSourceSystem().isBlank())
+                        systems.add(d.getSourceSystem());
+                });
+                return ResponseEntity.ok(systems.stream().distinct().sorted()
+                        .collect(java.util.stream.Collectors.toList()));
+            } catch (Exception ignored) { }
+        }
+        return ResponseEntity.ok(List.of());
+    }
+
     @PostMapping("/demo/seed")
     @Operation(summary = "Seed realistic demo steward tasks (dev / demo use)")
     public ResponseEntity<Map<String, Object>> seedDemoTasks(@AuthenticationPrincipal Jwt jwt) {
@@ -385,7 +422,7 @@ public class StewardController {
         result.put("matchScore", task.getMatchScore());
         result.put("matchMethod", task.getMatchMethod() != null ? task.getMatchMethod() : "UNKNOWN");
 
-        if (partyRepository == null || task.getCandidateIds() == null || task.getCandidateIds().size() < 2) {
+        if (task.getCandidateIds() == null || task.getCandidateIds().size() < 2) {
             result.put("hasPartyData", false);
             return ResponseEntity.ok(result);
         }
@@ -394,22 +431,27 @@ public class StewardController {
             String id1 = task.getCandidateIds().get(0);
             String id2 = task.getCandidateIds().get(1);
 
-            Party p1 = resolveParty(id1, task.getTaskData(), "party1GlobalId", "sourceId1");
-            Party p2 = resolveParty(id2, task.getTaskData(), "party2GlobalId", "sourceId2");
+            // Try Neo4j first; fall back to Cosmos if Neo4j is unavailable
+            Party p1 = resolvePartyWithFallback(id1, task.getTaskData(), "party1GlobalId", "sourceId1");
+            Party p2 = resolvePartyWithFallback(id2, task.getTaskData(), "party2GlobalId", "sourceId2");
 
             if (p1 == null || p2 == null) {
                 result.put("hasPartyData", false);
-                result.put("note", "Party records not found in Neo4j");
+                result.put("note", "Party records not found (checked Neo4j and Cosmos)");
                 return ResponseEntity.ok(result);
             }
 
             Map<String, Double> attrScores = new LinkedHashMap<>();
             double finalScore = task.getMatchScore() != null ? task.getMatchScore() : 0.0;
 
-            if (probabilisticMatcher != null) {
-                MatchingEngine.MatchScore ms = probabilisticMatcher.score(p1, p2, null);
-                attrScores.putAll(ms.getAttributeBreakdown());
-                finalScore = ms.getScore();
+            if (probabilisticMatcher != null && partyRepository != null) {
+                try {
+                    MatchingEngine.MatchScore ms = probabilisticMatcher.score(p1, p2, null);
+                    attrScores.putAll(ms.getAttributeBreakdown());
+                    finalScore = ms.getScore();
+                } catch (Exception ignored) {
+                    // Matcher unavailable (Neo4j down) — show party fields without per-attribute scores
+                }
             }
 
             result.put("party1",          partyToDisplayMap(p1));
@@ -423,6 +465,140 @@ public class StewardController {
         }
 
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Tries the Neo4j-based resolveParty first; if Neo4j is unavailable or returns null,
+     * falls back to Cosmos PartyDocRepository for party display data.
+     */
+    private Party resolvePartyWithFallback(String candidateId, Map<String, Object> taskData,
+                                            String globalIdKey, String sourceIdKey) {
+        // 1. Try Neo4j
+        if (partyRepository != null) {
+            try {
+                Party p = resolveParty(candidateId, taskData, globalIdKey, sourceIdKey);
+                if (p != null) return p;
+            } catch (Exception ignored) { /* Neo4j unavailable */ }
+        }
+        // 2. Fall back to Cosmos
+        if (partyDocRepository == null) return null;
+        try {
+            // Try globalId from taskData
+            if (taskData != null && taskData.get(globalIdKey) instanceof String gid) {
+                var doc = partyDocRepository.findByGlobalId(gid);
+                if (doc.isPresent()) return partyDocToParty(doc.get());
+            }
+            // Try candidateId as globalId
+            if (candidateId != null && candidateId.startsWith("P-")) {
+                var doc = partyDocRepository.findByGlobalId(candidateId);
+                if (doc.isPresent()) return partyDocToParty(doc.get());
+            }
+            // Try sourceId from taskData
+            if (taskData != null && taskData.get(sourceIdKey) instanceof String sid) {
+                var docs = partyDocRepository.findBySourceSystemId(sid);
+                if (!docs.isEmpty()) return partyDocToParty(docs.get(0));
+            }
+            // Try candidateId as globalId (last resort)
+            var doc = partyDocRepository.findByGlobalId(candidateId);
+            if (doc.isPresent()) return partyDocToParty(doc.get());
+        } catch (Exception ignored) { }
+        return null;
+    }
+
+    /**
+     * Lookup for forceMatchReview: supports global ID (P-...), source system + source ID, or source ID only.
+     * Tries Neo4j first (for scoring), falls back to Cosmos PartyDoc for party name/display info.
+     */
+    private Party lookupPartyForReview(String id, String sourceSystem) {
+        if (id == null || id.isBlank()) return null;
+        // 1. Try Neo4j if available
+        if (partyRepository != null) {
+            try {
+                if (id.startsWith("P-")) {
+                    var found = partyRepository.findByGlobalId(id);
+                    if (found.isPresent()) return found.get();
+                }
+                if (sourceSystem != null && !sourceSystem.isBlank()) {
+                    var list = partyRepository.findBySourceSystemAndSourceSystemId(sourceSystem, id);
+                    if (!list.isEmpty()) return list.get(0);
+                }
+                var list = partyRepository.findBySourceSystemIdOnly(id);
+                if (!list.isEmpty()) return list.get(0);
+            } catch (Exception ignored) { /* Neo4j unavailable — fall through to Cosmos */ }
+        }
+        // 2. Fall back to Cosmos PartyDoc (converts to Party shell for display)
+        if (partyDocRepository != null) {
+            try {
+                Optional<PartyDoc> doc = id.startsWith("P-")
+                        ? partyDocRepository.findByGlobalId(id)
+                        : (sourceSystem != null && !sourceSystem.isBlank()
+                            ? partyDocRepository.findBySourceSystemAndSourceSystemId(sourceSystem, id).stream().findFirst()
+                            : partyDocRepository.findByGlobalId(id));
+                if (doc.isPresent()) return partyDocToParty(doc.get());
+            } catch (Exception ignored) { }
+        }
+        return null;
+    }
+
+    private Party partyDocToParty(PartyDoc doc) {
+        Party.PartyBuilder b = Party.builder()
+                .globalId(doc.getGlobalId())
+                .goldenRecordId(doc.getGoldenRecordId() != null ? doc.getGoldenRecordId() : doc.getGlobalId())
+                .partyType(doc.getPartyType() != null ? doc.getPartyType() : "INDIVIDUAL")
+                .fullName(doc.getFullName())
+                .firstName(doc.getFirstName())
+                .lastName(doc.getLastName())
+                .organizationName(doc.getOrganizationName())
+                .sourceSystem(doc.getSourceSystem())
+                .sourceSystemId(doc.getSourceSystemId())
+                .status(doc.getStatus())
+                .nationality(doc.getNationality())
+                .dateOfBirth(doc.getDateOfBirth())
+                .taxId(doc.getTaxId())
+                .ein(doc.getEin())
+                .ssn(doc.getSsn())
+                .dunsNumber(doc.getDunsNumber())
+                .lei(doc.getLei())
+                .photoUrl(doc.getPhotoUrl());
+        // phones — prefer map, fall back to inline list
+        if (doc.getPhones() != null && !doc.getPhones().isEmpty()) {
+            b.phones(doc.getPhones());
+        } else if (doc.getPhoneNumbers() != null && !doc.getPhoneNumbers().isEmpty()) {
+            Map<String, String> pm = new LinkedHashMap<>();
+            for (int i = 0; i < doc.getPhoneNumbers().size(); i++) {
+                Object v = doc.getPhoneNumbers().get(i).get("number");
+                if (v != null) pm.put(String.valueOf(i), v.toString());
+            }
+            if (!pm.isEmpty()) b.phones(pm);
+        }
+        // emails — prefer map, fall back to inline list
+        if (doc.getEmails() != null && !doc.getEmails().isEmpty()) {
+            b.emails(doc.getEmails());
+        } else if (doc.getEmailAddresses() != null && !doc.getEmailAddresses().isEmpty()) {
+            Map<String, String> em = new LinkedHashMap<>();
+            for (int i = 0; i < doc.getEmailAddresses().size(); i++) {
+                Object v = doc.getEmailAddresses().get(i).get("address");
+                if (v != null) em.put(String.valueOf(i), v.toString());
+            }
+            if (!em.isEmpty()) b.emails(em);
+        }
+        // first inline address → Address object
+        if (doc.getAddresses() != null && !doc.getAddresses().isEmpty()) {
+            Map<String, Object> a = doc.getAddresses().get(0);
+            com.averio.mdm.domain.entity.Address addr = new com.averio.mdm.domain.entity.Address();
+            addr.setLine1(str(a, "line1"));
+            addr.setCity(str(a, "city"));
+            addr.setStateProvince(str(a, "stateProvince"));
+            addr.setPostalCode(str(a, "postalCode"));
+            addr.setCountry(str(a, "country"));
+            b.addresses(List.of(addr));
+        }
+        return b.build();
+    }
+
+    private static String str(Map<String, Object> m, String key) {
+        Object v = m.get(key);
+        return v != null ? v.toString() : null;
     }
 
     private Party resolveParty(String candidateId, Map<String, Object> taskData,
@@ -487,8 +663,395 @@ public class StewardController {
             m.put("addressPostal", addr.getPostalCode());
             m.put("addressCountry",addr.getCountry());
         }
+        m.put("photoUrl", p.getPhotoUrl());
         return m;
     }
+
+    /**
+     * POST /api/v1/steward/repair-golden-id?sourceSystemId=02112411&goldenRecordId=0023626574
+     *
+     * Directly patches the goldenRecordId on a Cosmos party document identified by
+     * sourceSystemId.  Used to repair records where a steward-approved merge completed
+     * in the task store but the underlying Cosmos document was not updated (e.g. because
+     * the cross-partition query ran before the @Query fix was deployed).
+     */
+    @PostMapping("/repair-golden-id")
+    @Operation(summary = "Repair golden ID on a Cosmos party doc by source system ID")
+    public ResponseEntity<Map<String, Object>> repairGoldenId(
+            @RequestParam String sourceSystemId,
+            @RequestParam String goldenRecordId,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String user = jwt != null ? jwt.getClaimAsString("preferred_username") : "SYSTEM";
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        if (partyDocRepository == null) {
+            result.put("status", "ERROR");
+            result.put("message", "PartyDocRepository not available");
+            return ResponseEntity.ok(result);
+        }
+
+        // Find matching docs by sourceSystemId — this query already works (no goldenRecordId filter)
+        List<com.averio.mdm.domain.cosmos.PartyDoc> docs =
+                partyDocRepository.findBySourceSystemId(sourceSystemId);
+
+        if (docs.isEmpty()) {
+            result.put("status", "NOT_FOUND");
+            result.put("message", "No Cosmos document found with sourceSystemId=" + sourceSystemId);
+            return ResponseEntity.ok(result);
+        }
+
+        int updated = 0;
+        List<Map<String, String>> changes = new ArrayList<>();
+        for (com.averio.mdm.domain.cosmos.PartyDoc doc : docs) {
+            String oldGoldenId = doc.getGoldenRecordId();
+            if (!goldenRecordId.equals(oldGoldenId)) {
+                doc.setGoldenRecordId(goldenRecordId);
+                doc.setUpdatedAt(java.time.LocalDateTime.now());
+                doc.setUpdatedBy(user);
+                partyDocRepository.save(doc);
+                updated++;
+                changes.add(Map.of(
+                    "globalId",      doc.getGlobalId(),
+                    "sourceSystemId", sourceSystemId,
+                    "oldGoldenId",   oldGoldenId != null ? oldGoldenId : "null",
+                    "newGoldenId",   goldenRecordId
+                ));
+                log.info("repairGoldenId: {} sourceSystemId={} {} → {}", doc.getGlobalId(), sourceSystemId, oldGoldenId, goldenRecordId);
+            }
+        }
+
+        result.put("status",  updated > 0 ? "UPDATED" : "ALREADY_CORRECT");
+        result.put("updated", updated);
+        result.put("changes", changes);
+        result.put("message", updated > 0
+            ? updated + " document(s) updated to goldenRecordId=" + goldenRecordId
+            : "goldenRecordId already correct — no update needed");
+        return ResponseEntity.ok(result);
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Golden ID Split / Unlink / Relink operations
+    // These work directly on Cosmos (and Neo4j when available) without requiring
+    // a queued steward task — the steward performs the action in real time.
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * POST /api/v1/steward/split-golden?goldenRecordId=0023626574
+     *
+     * SPLIT: Every source record under goldenRecordId gets its own brand-new golden ID.
+     * Supports multi-level split — if any of those sources were themselves previously
+     * merged clusters, each individual source still becomes its own entity.
+     *
+     * Response: list of { sourceSystemId, oldGoldenId, newGoldenId }
+     */
+    @PostMapping("/split-golden")
+    @Operation(summary = "Split all source records under a golden ID — each gets a new individual golden ID")
+    public ResponseEntity<Map<String, Object>> splitGolden(
+            @RequestParam String goldenRecordId,
+            @RequestParam(defaultValue = "SPLIT") String reason,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String user = jwt != null ? jwt.getClaimAsString("preferred_username") : "STEWARD";
+        List<Map<String, String>> results = new ArrayList<>();
+        int updated = 0;
+
+        if (partyDocRepository != null) {
+            // Find all Cosmos docs in the cluster
+            List<com.averio.mdm.domain.cosmos.PartyDoc> all = new ArrayList<>();
+            partyDocRepository.findAll().forEach(all::add);
+
+            List<com.averio.mdm.domain.cosmos.PartyDoc> cluster = all.stream()
+                    .filter(d -> goldenRecordId.equals(d.getGoldenRecordId()))
+                    .collect(java.util.stream.Collectors.toList());
+
+            log.info("splitGolden: goldenId={} clusterSize={} by={}", goldenRecordId, cluster.size(), user);
+
+            for (com.averio.mdm.domain.cosmos.PartyDoc doc : cluster) {
+                String newGoldenId = generateCosmosGoldenId();
+                doc.setGoldenRecordId(newGoldenId);
+                doc.setStatus("ACTIVE");
+                doc.setUpdatedAt(java.time.LocalDateTime.now());
+                doc.setUpdatedBy(user);
+                partyDocRepository.save(doc);
+                results.add(Map.of(
+                    "globalId",      doc.getGlobalId(),
+                    "sourceSystem",  doc.getSourceSystem() != null ? doc.getSourceSystem() : "",
+                    "sourceSystemId",doc.getSourceSystemId() != null ? doc.getSourceSystemId() : "",
+                    "oldGoldenId",   goldenRecordId,
+                    "newGoldenId",   newGoldenId
+                ));
+                updated++;
+                log.info("splitGolden: {} ({}) → new golden {}", doc.getSourceSystemId(), doc.getSourceSystem(), newGoldenId);
+            }
+        }
+
+        // Also attempt Neo4j split
+        if (partyRepository != null) {
+            try {
+                List<com.averio.mdm.domain.entity.Party> neo4jCluster =
+                        partyRepository.findByGoldenRecordId(goldenRecordId);
+                for (com.averio.mdm.domain.entity.Party p : neo4jCluster) {
+                    String newGoldenId = generateCosmosGoldenId();
+                    p.setGoldenRecordId(newGoldenId);
+                    p.setStatus("ACTIVE");
+                    p.setUpdatedAt(java.time.LocalDateTime.now());
+                    p.setUpdatedBy(user);
+                    partyRepository.save(p);
+                    // Only add to results if not already added from Cosmos
+                    boolean alreadyAdded = results.stream()
+                            .anyMatch(r -> p.getGlobalId().equals(r.get("globalId")));
+                    if (!alreadyAdded) {
+                        results.add(Map.of(
+                            "globalId",       p.getGlobalId(),
+                            "sourceSystem",   p.getSourceSystem() != null ? p.getSourceSystem() : "",
+                            "sourceSystemId", p.getSourceSystemId() != null ? p.getSourceSystemId() : "",
+                            "oldGoldenId",    goldenRecordId,
+                            "newGoldenId",    newGoldenId
+                        ));
+                        updated++;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("splitGolden Neo4j step failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("status",          updated > 0 ? "SPLIT" : "NO_RECORDS_FOUND");
+        response.put("oldGoldenId",     goldenRecordId);
+        response.put("recordsSplit",    updated);
+        response.put("reason",          reason);
+        response.put("performedBy",     user);
+        response.put("results",         results);
+        response.put("message", updated > 0
+            ? updated + " source record(s) split from golden " + goldenRecordId + ". Each now has its own golden ID."
+            : "No records found under golden ID " + goldenRecordId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * POST /api/v1/steward/unlink-source?sourceSystemId=02112411&currentGoldenId=0023626574
+     *
+     * UNLINK: Removes one source from its golden cluster and assigns it a brand-new golden ID.
+     * The original cluster is refreshed (survivorship re-runs without this source).
+     */
+    @PostMapping("/unlink-source")
+    @Operation(summary = "Remove a source record from its golden cluster — creates a new golden ID for it")
+    public ResponseEntity<Map<String, Object>> unlinkSource(
+            @RequestParam String sourceSystemId,
+            @RequestParam String currentGoldenId,
+            @RequestParam(defaultValue = "UNLINK") String reason,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String user = jwt != null ? jwt.getClaimAsString("preferred_username") : "STEWARD";
+        Map<String, Object> response = new LinkedHashMap<>();
+        String newGoldenId = generateCosmosGoldenId();
+        boolean found = false;
+
+        // Cosmos path
+        if (partyDocRepository != null) {
+            try {
+                List<com.averio.mdm.domain.cosmos.PartyDoc> matches =
+                        partyDocRepository.findBySourceSystemId(sourceSystemId);
+                for (com.averio.mdm.domain.cosmos.PartyDoc doc : matches) {
+                    if (currentGoldenId.equals(doc.getGoldenRecordId())) {
+                        log.info("unlinkSource: Cosmos {} from golden {} → new golden {}",
+                                sourceSystemId, currentGoldenId, newGoldenId);
+                        doc.setGoldenRecordId(newGoldenId);
+                        doc.setStatus("ACTIVE");
+                        doc.setUpdatedAt(java.time.LocalDateTime.now());
+                        doc.setUpdatedBy(user);
+                        partyDocRepository.save(doc);
+                        found = true;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("unlinkSource Cosmos step failed: {}", e.getMessage());
+            }
+        }
+
+        // Neo4j path
+        if (partyRepository != null) {
+            try {
+                List<com.averio.mdm.domain.entity.Party> neo4jMatches =
+                        partyRepository.findBySourceSystemIdOnly(sourceSystemId);
+                for (com.averio.mdm.domain.entity.Party p : neo4jMatches) {
+                    if (currentGoldenId.equals(p.getGoldenRecordId())) {
+                        p.setGoldenRecordId(newGoldenId);
+                        p.setStatus("ACTIVE");
+                        p.setUpdatedAt(java.time.LocalDateTime.now());
+                        p.setUpdatedBy(user);
+                        partyRepository.save(p);
+                        found = true;
+                    }
+                }
+                if (found && goldenRecordService != null) {
+                    // Refresh the original cluster survivorship without this source
+                    goldenRecordService.refreshGoldenRecord(currentGoldenId, user);
+                }
+            } catch (Exception e) {
+                log.warn("unlinkSource Neo4j step failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        response.put("status",          found ? "UNLINKED" : "NOT_FOUND");
+        response.put("sourceSystemId",  sourceSystemId);
+        response.put("oldGoldenId",     currentGoldenId);
+        response.put("newGoldenId",     found ? newGoldenId : null);
+        response.put("reason",          reason);
+        response.put("performedBy",     user);
+        response.put("message", found
+            ? "Source " + sourceSystemId + " unlinked from golden " + currentGoldenId
+              + " and assigned new golden ID " + newGoldenId
+            : "Source " + sourceSystemId + " not found under golden ID " + currentGoldenId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * POST /api/v1/steward/relink-source?sourceSystemId=02112411&fromGoldenId=0023626574&toGoldenId=0009876543
+     *
+     * RELINK: Moves one source record from its current golden cluster to a different existing golden ID.
+     * Both clusters get their survivorship refreshed.
+     */
+    @PostMapping("/relink-source")
+    @Operation(summary = "Move a source record from one golden cluster to another")
+    public ResponseEntity<Map<String, Object>> relinkSource(
+            @RequestParam String sourceSystemId,
+            @RequestParam String fromGoldenId,
+            @RequestParam String toGoldenId,
+            @RequestParam(defaultValue = "RELINK") String reason,
+            @AuthenticationPrincipal Jwt jwt) {
+
+        String user = jwt != null ? jwt.getClaimAsString("preferred_username") : "STEWARD";
+        Map<String, Object> response = new LinkedHashMap<>();
+        boolean found = false;
+
+        // Cosmos path
+        if (partyDocRepository != null) {
+            try {
+                List<com.averio.mdm.domain.cosmos.PartyDoc> matches =
+                        partyDocRepository.findBySourceSystemId(sourceSystemId);
+                for (com.averio.mdm.domain.cosmos.PartyDoc doc : matches) {
+                    if (fromGoldenId.equals(doc.getGoldenRecordId())) {
+                        log.info("relinkSource: Cosmos {} from golden {} → golden {}",
+                                sourceSystemId, fromGoldenId, toGoldenId);
+                        doc.setGoldenRecordId(toGoldenId);
+                        doc.setStatus("ACTIVE");
+                        doc.setUpdatedAt(java.time.LocalDateTime.now());
+                        doc.setUpdatedBy(user);
+                        partyDocRepository.save(doc);
+                        found = true;
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("relinkSource Cosmos step failed: {}", e.getMessage());
+            }
+        }
+
+        // Neo4j path
+        if (partyRepository != null) {
+            try {
+                List<com.averio.mdm.domain.entity.Party> neo4jMatches =
+                        partyRepository.findBySourceSystemIdOnly(sourceSystemId);
+                for (com.averio.mdm.domain.entity.Party p : neo4jMatches) {
+                    if (fromGoldenId.equals(p.getGoldenRecordId())) {
+                        p.setGoldenRecordId(toGoldenId);
+                        p.setStatus("ACTIVE");
+                        p.setUpdatedAt(java.time.LocalDateTime.now());
+                        p.setUpdatedBy(user);
+                        partyRepository.save(p);
+                        found = true;
+                    }
+                }
+                if (found && goldenRecordService != null) {
+                    goldenRecordService.refreshGoldenRecord(fromGoldenId, user);
+                    goldenRecordService.refreshGoldenRecord(toGoldenId, user);
+                }
+            } catch (Exception e) {
+                log.warn("relinkSource Neo4j step failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        response.put("status",         found ? "RELINKED" : "NOT_FOUND");
+        response.put("sourceSystemId", sourceSystemId);
+        response.put("fromGoldenId",   fromGoldenId);
+        response.put("toGoldenId",     toGoldenId);
+        response.put("reason",         reason);
+        response.put("performedBy",    user);
+        response.put("message", found
+            ? "Source " + sourceSystemId + " moved from golden " + fromGoldenId + " to " + toGoldenId
+            : "Source " + sourceSystemId + " not found under golden ID " + fromGoldenId);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * GET /api/v1/steward/golden-cluster?goldenRecordId=0023626574
+     *
+     * Returns all source records currently under a given golden ID.
+     * Used by the UI to preview which records will be affected before split/unlink/relink.
+     */
+    @GetMapping("/golden-cluster")
+    @Operation(summary = "List all source records under a given golden ID")
+    public ResponseEntity<Map<String, Object>> getGoldenCluster(
+            @RequestParam String goldenRecordId) {
+
+        List<Map<String, String>> sources = new ArrayList<>();
+
+        if (partyDocRepository != null) {
+            try {
+                List<com.averio.mdm.domain.cosmos.PartyDoc> all = new ArrayList<>();
+                partyDocRepository.findAll().forEach(all::add);
+                all.stream()
+                   .filter(d -> goldenRecordId.equals(d.getGoldenRecordId()))
+                   .forEach(d -> sources.add(Map.of(
+                       "globalId",       d.getGlobalId() != null ? d.getGlobalId() : "",
+                       "sourceSystem",   d.getSourceSystem() != null ? d.getSourceSystem() : "",
+                       "sourceSystemId", d.getSourceSystemId() != null ? d.getSourceSystemId() : "",
+                       "fullName",       d.getFullName() != null ? d.getFullName()
+                                         : ((d.getFirstName() != null ? d.getFirstName() : "")
+                                           + " " + (d.getLastName() != null ? d.getLastName() : "")).trim(),
+                       "status",         d.getStatus() != null ? d.getStatus() : "",
+                       "partyType",      d.getPartyType() != null ? d.getPartyType() : ""
+                   )));
+            } catch (Exception e) {
+                log.warn("getGoldenCluster Cosmos failed: {}", e.getMessage());
+            }
+        }
+
+        if (sources.isEmpty() && partyRepository != null) {
+            try {
+                partyRepository.findByGoldenRecordId(goldenRecordId).forEach(p -> {
+                    boolean alreadyIn = sources.stream()
+                            .anyMatch(s -> p.getGlobalId().equals(s.get("globalId")));
+                    if (!alreadyIn) sources.add(Map.of(
+                        "globalId",       p.getGlobalId() != null ? p.getGlobalId() : "",
+                        "sourceSystem",   p.getSourceSystem() != null ? p.getSourceSystem() : "",
+                        "sourceSystemId", p.getSourceSystemId() != null ? p.getSourceSystemId() : "",
+                        "fullName",       displayName(p),
+                        "status",         p.getStatus() != null ? p.getStatus() : "",
+                        "partyType",      p.getPartyType() != null ? p.getPartyType() : ""
+                    ));
+                });
+            } catch (Exception e) {
+                log.warn("getGoldenCluster Neo4j failed: {}", e.getMessage());
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("goldenRecordId", goldenRecordId);
+        result.put("sourceCount",    sources.size());
+        result.put("sources",        sources);
+        return ResponseEntity.ok(result);
+    }
+
+    private static String generateCosmosGoldenId() {
+        return String.format("%010d", java.util.concurrent.ThreadLocalRandom.current()
+                .nextLong(0, 10_000_000_000L));
+    }
+
+    @Autowired(required = false)
+    private GoldenRecordService goldenRecordService;
 
     private String displayName(Party p) {
         if (p.getFullName() != null && !p.getFullName().isBlank()) return p.getFullName();

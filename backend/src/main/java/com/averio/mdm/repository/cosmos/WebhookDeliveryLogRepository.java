@@ -8,5 +8,6 @@ import java.util.List;
 
 @Repository
 public interface WebhookDeliveryLogRepository extends CosmosRepository<WebhookDeliveryLog, String> {
+    List<WebhookDeliveryLog> findAll();
     List<WebhookDeliveryLog> findByWebhookId(String webhookId);
 }

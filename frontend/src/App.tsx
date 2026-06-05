@@ -37,6 +37,16 @@ import TestLab from "./pages/testlab/TestLab";
 import HelpDocs from "./pages/help/HelpDocs";
 import Webhooks from "./pages/settings/Webhooks";
 import ExtensionDocs from "./pages/docs/ExtensionDocs";
+import PlatformAdminRoute from "./components/layout/PlatformAdminRoute";
+import PlatformLayout from "./components/layout/PlatformLayout";
+import PlatformDashboard from "./pages/platform/PlatformDashboard";
+import TenantManagement from "./pages/platform/TenantManagement";
+import LicenseManagement from "./pages/platform/LicenseManagement";
+import FeatureFlags from "./pages/platform/FeatureFlags";
+import SystemConfig from "./pages/platform/SystemConfig";
+import UserManagement from "./pages/platform/UserManagement";
+import ReleaseManagement from "./pages/platform/ReleaseManagement";
+import UsageAnalytics from "./pages/platform/UsageAnalytics";
 
 // ── License gate wrapper ───────────────────────────────────────────────────
 
@@ -136,6 +146,19 @@ export default function App() {
             <Route path="help"             element={<HelpDocs />} />
             <Route path="settings/webhooks" element={<Webhooks />} />
             <Route path="docs/extensions"  element={<ExtensionDocs />} />
+          </Route>
+        </Route>
+        {/* ── Averio Control Plane — PLATFORM_ADMIN only ── */}
+        <Route element={<PlatformAdminRoute />}>
+          <Route path="/platform" element={<PlatformLayout />}>
+            <Route index element={<PlatformDashboard />} />
+            <Route path="tenants"   element={<TenantManagement />} />
+            <Route path="licenses"  element={<LicenseManagement />} />
+            <Route path="flags"     element={<FeatureFlags />} />
+            <Route path="config"    element={<SystemConfig />} />
+            <Route path="users"     element={<UserManagement />} />
+            <Route path="releases"  element={<ReleaseManagement />} />
+            <Route path="analytics" element={<UsageAnalytics />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

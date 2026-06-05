@@ -106,6 +106,10 @@ export const enterpriseViewApi = {
 // ---- Steward API ----
 export const stewardApi = {
   getTasks: (priority?: string) => api.get(`/steward/tasks`, { params: { priority } }).then((r) => r.data),
+  getTasksPaged: (params: {
+    search?: string; priority?: string; status?: string; taskType?: string;
+    page?: number; size?: number; sortBy?: string; sortDir?: string;
+  }) => api.get(`/steward/tasks`, { params }).then((r) => r.data),
   getMyTasks: () => api.get(`/steward/tasks/my`).then((r) => r.data),
   getTask: (taskId: string) => api.get(`/steward/tasks/${taskId}`).then((r) => r.data),
   assignTask: (taskId: string, assignee: string) =>
@@ -114,11 +118,26 @@ export const stewardApi = {
     api.post(`/steward/tasks/${taskId}/resolve`, null, { params: { resolution, notes } }).then((r) => r.data),
   escalateTask: (taskId: string) => api.post(`/steward/tasks/${taskId}/escalate`).then((r) => r.data),
   getQueueSummary: () => api.get(`/steward/queue-summary`).then((r) => r.data),
-  forceMatchReview: (sourceId1: string, sourceId2: string, priority = "MEDIUM") =>
+  forceMatchReview: (
+    sourceId1: string, sourceId2: string,
+    sourceSystem1?: string, sourceSystem2?: string,
+    priority = "MEDIUM"
+  ) =>
     api.post(`/steward/force-match-review`, null, {
-      params: { sourceId1, sourceId2, priority },
+      params: { sourceId1, sourceId2, sourceSystem1, sourceSystem2, priority },
     }).then((r) => r.data),
+  getSourceSystems: () => api.get(`/steward/source-systems`).then((r) => r.data as string[]),
   seedDemoTasks: () => api.post(`/steward/demo/seed`).then((r) => r.data),
+  repairGoldenId: (sourceSystemId: string, goldenRecordId: string) =>
+    api.post(`/steward/repair-golden-id`, null, { params: { sourceSystemId, goldenRecordId } }).then((r) => r.data),
+  getGoldenCluster: (goldenRecordId: string) =>
+    api.get(`/steward/golden-cluster`, { params: { goldenRecordId } }).then((r) => r.data),
+  splitGolden: (goldenRecordId: string, reason: string) =>
+    api.post(`/steward/split-golden`, null, { params: { goldenRecordId, reason } }).then((r) => r.data),
+  unlinkSource: (sourceSystemId: string, currentGoldenId: string, reason: string) =>
+    api.post(`/steward/unlink-source`, null, { params: { sourceSystemId, currentGoldenId, reason } }).then((r) => r.data),
+  relinkSource: (sourceSystemId: string, fromGoldenId: string, toGoldenId: string, reason: string) =>
+    api.post(`/steward/relink-source`, null, { params: { sourceSystemId, fromGoldenId, toGoldenId, reason } }).then((r) => r.data),
   getMatchDetail: (taskId: string) => api.get(`/steward/tasks/${taskId}/match-detail`).then((r) => r.data),
 };
 
@@ -469,6 +488,134 @@ export const apiKeyApi = {
 export const derivedAttributeApi = {
   getForEntity: (domain: string, entityId: string) =>
     api.get(`/extensions/derived/${domain}/${entityId}`).then((r) => r.data as DerivedAttributeValue[]),
+};
+
+// ── Platform Admin API (AVERIO INTERNAL — PLATFORM_ADMIN only) ──────────────
+
+export type PlatformTenant = {
+  id?: string;
+  tenantCode: string;
+  name: string;
+  domain: string;
+  contactName: string;
+  contactEmail: string;
+  licenseTier: string;
+  enabledModules: string[];
+  status: string;
+  licenseExpiry?: string;
+  partyLimit?: number;
+  apiCallsPerMonth?: number;
+  webhookLimit?: number;
+  autoRenew?: boolean;
+  region?: string;
+  contractRef?: string;
+  notes?: string;
+  createdBy?: string;
+  updatedBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type PlatformFeatureFlag = {
+  id?: string;
+  flagKey: string;
+  displayName: string;
+  description?: string;
+  category: string;
+  flagType: string;
+  globalDefault: boolean | string | number;
+  tenantOverrides: Record<string, boolean | string | number>;
+  enabled: boolean;
+  updatedBy?: string;
+  updatedAt?: string;
+};
+
+export type PlatformConfigEntry = {
+  id?: string;
+  category: string;
+  configKey: string;
+  label: string;
+  description?: string;
+  configType: string;
+  value: string;
+  defaultValue?: string;
+  sensitive?: boolean;
+  requiresRestart?: boolean;
+  options?: string[];
+  updatedBy?: string;
+  updatedAt?: string;
+};
+
+export type PlatformUserEntry = {
+  id?: string;
+  username: string;
+  displayName: string;
+  email: string;
+  role: string;
+  tenantCode?: string | null;
+  tenantName?: string | null;
+  status: string;
+  mfaEnabled?: boolean;
+  lastLogin?: string | null;
+  createdAt?: string;
+  createdBy?: string;
+};
+
+export type ProductReleaseEntry = {
+  id?: string;
+  version: string;
+  title: string;
+  status: string;
+  highlights: string[];
+  bugFixes: string[];
+  breakingChanges: string[];
+  linkedTickets: string[];
+  currentProduction: boolean;
+  deployedBy?: string | null;
+  deployedAt?: string | null;
+  releasedAt?: string | null;
+  createdAt?: string;
+};
+
+export const platformApi = {
+  // Tenants
+  listTenants:   ()                                           => api.get(`/platform/tenants`).then((r) => r.data as PlatformTenant[]),
+  createTenant:  (t: PlatformTenant, actor: string)          => api.post(`/platform/tenants`, t, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformTenant),
+  updateTenant:  (id: string, t: PlatformTenant, actor: string) => api.put(`/platform/tenants/${id}`, t, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformTenant),
+  deleteTenant:  (id: string, actor: string)                 => api.delete(`/platform/tenants/${id}`, { headers: { "X-Platform-User": actor } }),
+  setTenantStatus: (id: string, status: string, actor: string) => api.post(`/platform/tenants/${id}/status`, { status }, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformTenant),
+
+  // Feature flags
+  listFlags:     ()                                           => api.get(`/platform/flags`).then((r) => r.data as PlatformFeatureFlag[]),
+  updateFlag:    (id: string, flag: PlatformFeatureFlag, actor: string) => api.put(`/platform/flags/${id}`, flag, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformFeatureFlag),
+  toggleFlag:    (id: string, actor: string)                 => api.post(`/platform/flags/${id}/toggle`, null, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformFeatureFlag),
+  setFlagOverride: (id: string, tenantCode: string, value: boolean | string | number | null, actor: string) =>
+    api.post(`/platform/flags/${id}/override`, { tenantCode, value }, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformFeatureFlag),
+
+  // System config
+  listConfig:    ()                                           => api.get(`/platform/config`).then((r) => r.data as PlatformConfigEntry[]),
+  updateConfig:  (id: string, cfg: PlatformConfigEntry, actor: string) => api.put(`/platform/config/${id}`, cfg, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformConfigEntry),
+  resetConfig:   (id: string, actor: string)                 => api.post(`/platform/config/${id}/reset`, null, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformConfigEntry),
+
+  // Users
+  listUsers:     ()                                           => api.get(`/platform/users`).then((r) => r.data as PlatformUserEntry[]),
+  createUser:    (u: PlatformUserEntry, actor: string)       => api.post(`/platform/users`, u, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformUserEntry),
+  setUserStatus: (id: string, status: string, actor: string) => api.post(`/platform/users/${id}/status`, { status }, { headers: { "X-Platform-User": actor } }).then((r) => r.data as PlatformUserEntry),
+  deleteUser:    (id: string)                                 => api.delete(`/platform/users/${id}`),
+
+  // Releases
+  listReleases:  ()                                           => api.get(`/platform/releases`).then((r) => r.data as ProductReleaseEntry[]),
+  createRelease: (r: ProductReleaseEntry)                    => api.post(`/platform/releases`, r).then((res) => res.data as ProductReleaseEntry),
+  updateRelease: (id: string, r: ProductReleaseEntry)        => api.put(`/platform/releases/${id}`, r).then((res) => res.data as ProductReleaseEntry),
+  deployRelease: (id: string, actor: string)                 => api.post(`/platform/releases/${id}/deploy`, null, { headers: { "X-Platform-User": actor } }).then((r) => r.data as ProductReleaseEntry),
+
+  // Analytics
+  getAnalyticsSummary: ()  => api.get(`/platform/analytics/summary`).then((r) => r.data as Record<string, number>),
+  getAnalyticsTenants: ()  => api.get(`/platform/analytics/tenants`).then((r) => r.data as Record<string, unknown>[]),
+  getAnalyticsWebhooks: () => api.get(`/platform/analytics/webhooks`).then((r) => r.data as Record<string, unknown>),
+
+  // Health
+  health: () => api.get(`/platform/health`).then((r) => r.data),
 };
 
 export default api;

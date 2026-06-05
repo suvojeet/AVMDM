@@ -8,6 +8,7 @@ import java.util.List;
 
 @Repository
 public interface WebhookRegistrationRepository extends CosmosRepository<WebhookRegistration, String> {
+    List<WebhookRegistration> findAll();
     List<WebhookRegistration> findByTenantId(String tenantId);
     List<WebhookRegistration> findByTenantIdAndIsActive(String tenantId, Boolean isActive);
 }

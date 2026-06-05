@@ -9,6 +9,7 @@ import java.util.Optional;
 
 @Repository
 public interface TenantApiKeyRepository extends CosmosRepository<TenantApiKey, String> {
+    List<TenantApiKey> findAll();
     List<TenantApiKey> findByTenantId(String tenantId);
     Optional<TenantApiKey> findByKeyHash(String keyHash);
 }

@@ -12,13 +12,17 @@ spring:
   # without exclusion it auto-configures against localhost:9200 and fails.
   # Re-enable Redis by removing RedisAutoConfiguration below once the app is on a
   # plan with VNet integration (S1+) or the cache allows public access.
+  #
+  # Only the connection-level autoconfigurations are excluded. Do NOT add the
+  # *RepositoriesAutoConfiguration entries here: excluding those tears down the
+  # Spring Data repository infrastructure that SpringDataWebAutoConfiguration
+  # needs, and every MVC request then fails with
+  # NoClassDefFoundError: DomainClassConverter$ToEntityConverter.
   autoconfigure:
     exclude:
       - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
       - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
       - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration
-      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchRepositoriesAutoConfiguration
 
   # Azure AD JWT authentication (required in production)
   security:

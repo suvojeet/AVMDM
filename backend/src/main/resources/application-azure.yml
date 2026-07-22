@@ -1,0 +1,74 @@
+# Azure Cloud Profile
+# Activate by setting App Service Application Setting: SPRING_PROFILES_ACTIVE=azure
+# All ${VAR} values below must be set as App Service Application Settings.
+
+spring:
+
+  # Redis — Azure Cache for Redis uses port 6380 with SSL/TLS
+  data:
+    redis:
+      host: ${REDIS_HOST:averiomdmcache.redis.cache.windows.net}
+      port: ${REDIS_PORT:6380}
+      password: ${REDIS_PASSWORD}
+      ssl:
+        enabled: true
+      timeout: 5000ms
+      lettuce:
+        pool:
+          max-active: 20
+          max-idle: 10
+          min-idle: 2
+          time-between-eviction-runs: 60s
+
+  # Azure AD JWT authentication (required in production)
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: ${AZURE_AD_JWK_URI}
+
+# Actuator — expose health probes for Azure App Service
+management:
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+    neo4j:
+      enabled: true
+    redis:
+      enabled: true
+
+# CORS — override with your Azure Static Web App URL(s)
+averio:
+  cors:
+    allowed-origins: ${CORS_ORIGINS:https://mdm.averiomdm.org}
+
+# Client-facing production logging.
+# Shows: app startup, DB connectivity, health checks, and errors only.
+# Averio developers can raise detail by setting LOG_LEVEL_APP=DEBUG in App Service settings.
+logging:
+  level:
+    root: WARN
+    com.averio.mdm: ${LOG_LEVEL_APP:INFO}
+    "[org.springframework.boot]": INFO
+    "[org.springframework.data.neo4j]": WARN
+    "[org.neo4j.driver]": WARN
+    "[com.azure.spring.data.cosmos]": WARN
+    "[org.springframework.data.redis]": WARN
+    "[org.springframework.security]": WARN
+    "[org.springframework.web]": WARN
+    "[org.apache.catalina]": WARN
+    "[io.netty]": WARN
+    "[reactor.netty]": WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} %-5level [%X{correlationId}] %logger{30} - %msg%n"

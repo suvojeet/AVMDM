@@ -5,8 +5,8 @@
     "environment": { "value": "prod" },
     "location": { "value": "eastus2" },
     "appName": { "value": "averio-mdm" },
-    "neo4jAuraUri": { "value": "neo4j+s://YOUR-NEO4J-AURA-URI.databases.neo4j.io" },
-    "neo4jPassword": { "value": "YOUR-NEO4J-PASSWORD" },
+    "neo4jAuraUri": { "value": "neo4j+s://d3f3a6bd.databases.neo4j.io" },
+    "neo4jPassword": { "value": "ZkAhmwCZIjX3dFZA7f-XtJtBej2aUy-irqViTJwmpr4" },
     "azureOpenAiEndpoint": { "value": "https://YOUR-OPENAI.openai.azure.com/" }
   }
 }

@@ -25,9 +25,11 @@ public class GoldenRecord {
     private Map<String, GoldenAttribute> goldenAttributes;
 
     // All source records contributing to this golden record
+    @Builder.Default
     private List<SourceRecord> sourceRecords = new ArrayList<>();
 
     // Merge/link history
+    @Builder.Default
     private List<MergeEvent> mergeHistory = new ArrayList<>();
 
     // Quality scores
@@ -58,6 +60,7 @@ public class GoldenRecord {
         private String survivorshipRule;     // SOURCE_PRIORITY, MOST_RECENT, MOST_FREQUENT, SUPREMACY, ML_BASED
         private Double confidenceScore;
         private LocalDateTime lastUpdated;
+        @Builder.Default
         private List<AttributeCandidate> candidates = new ArrayList<>();
     }
 

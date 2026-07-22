@@ -131,9 +131,11 @@ public class Account {
     private Long version;
 
     // ---- Relationships ----
+    @Builder.Default
     @Relationship(type = "ACCOUNT_HOLDER", direction = Relationship.Direction.OUTGOING)
     private List<Party> holders = new ArrayList<>();
 
+    @Builder.Default
     @Relationship(type = "HAS_PRODUCT", direction = Relationship.Direction.OUTGOING)
     private List<Product> products = new ArrayList<>();
 }

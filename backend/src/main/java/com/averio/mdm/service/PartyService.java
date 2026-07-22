@@ -475,11 +475,24 @@ public class PartyService {
         }
     }
 
+    private String buildFullName(String firstName, String middleName, String lastName) {
+        return java.util.stream.Stream.of(firstName, middleName, lastName)
+                .filter(s -> s != null && !s.isBlank())
+                .collect(java.util.stream.Collectors.joining(" "));
+    }
+
     private void applyUpdates(Party existing, Party updates) {
-        if (updates.getFirstName() != null) existing.setFirstName(updates.getFirstName());
-        if (updates.getLastName() != null) existing.setLastName(updates.getLastName());
-        if (updates.getMiddleName() != null) existing.setMiddleName(updates.getMiddleName());
-        if (updates.getFullName() != null) existing.setFullName(updates.getFullName());
+        boolean namePartChanged = false;
+        if (updates.getFirstName() != null)  { existing.setFirstName(updates.getFirstName());   namePartChanged = true; }
+        if (updates.getLastName() != null)   { existing.setLastName(updates.getLastName());      namePartChanged = true; }
+        if (updates.getMiddleName() != null) { existing.setMiddleName(updates.getMiddleName());  namePartChanged = true; }
+
+        // Explicit fullName from caller always wins; otherwise recompute from parts for individuals.
+        if (updates.getFullName() != null) {
+            existing.setFullName(updates.getFullName());
+        } else if (namePartChanged && !"ORGANIZATION".equalsIgnoreCase(existing.getPartyType())) {
+            existing.setFullName(buildFullName(existing.getFirstName(), existing.getMiddleName(), existing.getLastName()));
+        }
         if (updates.getDateOfBirth() != null) existing.setDateOfBirth(updates.getDateOfBirth());
         if (updates.getGender() != null) existing.setGender(updates.getGender());
         if (updates.getOrganizationName() != null) existing.setOrganizationName(updates.getOrganizationName());

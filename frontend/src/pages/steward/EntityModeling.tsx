@@ -790,8 +790,8 @@ function SchemaCard({ schema, onEdit, onToggle, onDelete }: {
                   {f.referenceCategory ? ` · ${f.referenceCategory}` : ""}
                 </span>
                 {f.required && <span className="text-[9px] text-red-400">req</span>}
-                {f.survivable && <Shield size={9} className="text-blue-400" title="Survivable" />}
-                {f.matchable  && <Link  size={9} className="text-purple-400" title="Matchable" />}
+                {f.survivable && <span title="Survivable"><Shield size={9} className="text-blue-400" /></span>}
+                {f.matchable  && <span title="Matchable"><Link  size={9} className="text-purple-400" /></span>}
               </div>
             ))}
           </div>

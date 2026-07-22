@@ -1,453 +1,455 @@
-# UNITED STATES PATENT APPLICATION
+# UNITED STATES PROVISIONAL PATENT APPLICATION
 
 ---
 
-**Application Type:** Non-Provisional Utility Patent Application  
-**Filed Under:** 35 U.S.C. § 111(a)  
-**Applicant:** Averio Technologies Inc.  
-**Inventors:** Suvojeet Pal; Rakhi Chatterjee  
-**Correspondence Address:** [Attorney/Agent Address]  
-**Attorney Docket No.:** AVERIO-001-US  
+**Application Type:** Provisional Application for Patent  
+**Filed Under:** 35 U.S.C. § 111(b)  
+**Applicant:** Suvojeet Pal (Individual)  
+**Inventor:** Suvojeet Pal  
+**Correspondence Address:** [Inventor Address]  
+**Docket Reference:** AVERIO-001-US-PROV  
 
 ---
 
 ## TITLE OF THE INVENTION
 
-**ADAPTIVE MULTI-STRATEGY ENTITY RESOLUTION SYSTEM WITH  
-PROBABILISTIC CLUSTER DRIFT DETECTION, PROVISIONAL GOLDEN  
-IDENTITY MANAGEMENT, AND SELF-CALIBRATING FELLEGI-SUNTER  
-PARAMETER ESTIMATION FOR ENTERPRISE MASTER DATA MANAGEMENT**
-
----
-
-## CROSS-REFERENCE TO RELATED APPLICATIONS
-
-This application claims priority to U.S. Provisional Application No. [TBD], filed [DATE], the entire contents of which are incorporated herein by reference.
+**ADAPTIVE MULTI-STRATEGY ENTITY RESOLUTION SYSTEM WITH PROBABILISTIC CLUSTER DRIFT DETECTION, PROVISIONAL GOLDEN IDENTITY MANAGEMENT, AND SELF-CALIBRATING FELLEGI-SUNTER PARAMETER ESTIMATION FOR ENTERPRISE MASTER DATA MANAGEMENT**
 
 ---
 
 ## FIELD OF THE INVENTION
 
-The present invention relates to enterprise software systems for Master Data Management (MDM), and more particularly to systems and methods for large-scale probabilistic entity resolution, adaptive cluster maintenance, provisional identity assignment, and self-calibrating statistical parameter learning in MDM platforms serving Fortune 500 financial institutions and regulated industries.
+This invention is in the field of enterprise software — specifically, systems that manage and deduplicate customer and business entity records across multiple source systems at large scale. The core problem the invention solves is: given hundreds of millions of records arriving from different systems over time, how do you reliably determine which records refer to the same real-world person or organization, keep that determination accurate as data changes, and guarantee that every record is always identifiable — even before a human has reviewed it?
 
 ---
 
-## BACKGROUND OF THE INVENTION
+## BACKGROUND
 
-### The Entity Resolution Problem at Scale
+### How I Came to Build This
 
-Enterprise Master Data Management systems must resolve whether two or more records from different source systems — Customer Relationship Management (CRM), Enterprise Resource Planning (ERP), Core Banking, insurance platforms, and regulatory reporting systems — refer to the same real-world entity. This problem, known as entity resolution, deduplication, or record linkage, presents fundamental computational and accuracy challenges at enterprise scale.
+I built Averio MDM after years of working in data management and watching enterprises struggle with the same fundamental problem: their customer data lived in a dozen different systems, and no two systems agreed on who was who. A customer named "Robert Johnson" in the CRM was "Bob Johnson" in the billing system and "R. Johnson" at the same address in the loan platform. Identity resolution — figuring out that these three records are the same person — was either done by expensive consulting projects with static rule sets, or not done at all.
 
-A naive pairwise comparison of N records requires O(N²) comparisons. For an enterprise with one billion customer records, this yields 10¹⁸ comparisons — physically impossible to execute in real time or even batch. Prior art systems address this through "blocking," which pre-filters candidate pairs using shared attributes (e.g., same last name, same postal code), but existing blocking implementations apply at most two or three strategies in isolation, resulting in high miss rates for records with data quality variation.
+The commercial MDM products that existed (IBM InfoSphere, Informatica, SAP MDG, Reltio) all shared the same architectural limitations that I kept running into:
 
-### The Static Match Model Problem
+**They block candidates using too few strategies.** Most systems pick one or two blocking strategies — typically phonetic name and postal code. If a name is spelled differently in two systems, or a customer moved, those records never even get compared. The miss rate on real enterprise data is surprisingly high.
 
-Existing MDM platforms — including IBM InfoSphere MDM, Informatica MDM, SAP Master Data Governance, TIBCO EBX, and Reltio Cloud — rely on fixed, manually configured match rules or pre-trained statistical models whose parameters do not evolve with incoming data. A parameter such as "the probability that two matching individuals share the same first name spelling" (the m-probability in Fellegi-Sunter terminology) is hardcoded by a consultant at deployment time and never updated. As data quality improves, as new source systems are onboarded, or as demographic patterns shift, the static parameters degrade in accuracy.
+**Their match models are frozen at deployment.** The statistical parameters that determine how much weight to give a first-name match versus a phone match are set once by a consultant and never updated. As data quality improves over time, as new source systems come in, as the demographics of the customer base shift — the model just gets stale. Nobody re-runs the calibration.
 
-### The Null Golden Identity Problem
+**They leave records in a limbo state.** When a record can't be auto-matched and gets sent to a human reviewer, it sits in a queue with no identity. It can't be found by golden ID, it doesn't appear in reports, downstream applications that query by customer master ID get nothing back. This can last days or weeks. For a bank, that means a customer who just opened an account can't be seen by the risk system yet.
 
-All known MDM systems allow entities to exist in a "null golden state" — a condition where a source record has been ingested but no golden identifier has been assigned because the record is pending steward review. During the review period (which can last days or weeks in large enterprises), the record is invisible to downstream applications that query by golden identifier. This creates a temporal data gap that violates the MDM promise of a single, always-available authoritative identity.
+**They don't notice when a cluster goes wrong.** Once two records get merged into a cluster, they stay merged even if the attributes that caused the merge are later corrected. The phone number that linked two records together gets fixed — but the incorrect merge stays. Nobody detects this unless a human happens to look.
 
-### The Cluster Drift Problem
+**They operate in a single matching mode.** Either you write rules, or you configure a statistical model. There's no system that falls through to an AI-based disambiguation for the cases that sit right on the fence.
 
-No known commercial MDM system addresses the situation in which an entity's attributes change after golden cluster assignment such that the entity no longer statistically belongs to its assigned cluster. For example, a party record initially merged with "ACME Corporation" because it shared a phone number may later have that phone number corrected to a different value, causing it to be more similar to "Acme Industries" than to "ACME Corporation." All existing MDM systems ignore this post-assignment drift, leaving incorrect cluster assignments permanently in place unless manually discovered and corrected by a data steward.
+These are real, specific problems I encountered repeatedly. Averio MDM is my attempt to fix all of them in one coherent system.
 
-### The Single-Mode Matching Problem
+### Why Existing Approaches Fall Short
 
-Existing systems operate in a single matching mode: either deterministic (rule-based) or probabilistic (statistical), but not both in a principled, cascading architecture. The emerging practice of using Large Language Models (LLMs) for entity resolution does not exist in any commercial MDM platform as a fallback for edge-case disambiguation.
+**On blocking:** A naive pairwise comparison of N records is O(N²). For a billion-record enterprise that's 10¹⁸ comparisons — not workable. Blocking narrows the search, but single-strategy blocking misses too many real matches when data quality varies across systems. Two records for the same person won't share a blocking key if one system truncated the last name and the other stored an old address. The solution I developed uses nine independent strategies simultaneously, taking their union so that any single strategy match is sufficient to bring a candidate into scope.
 
-### Need in the Art
+**On self-calibrating parameters:** The Fellegi-Sunter model assigns weights based on two probabilities per attribute: the probability of agreement given a true match (m-probability) and the probability of agreement given a true non-match (u-probability). In prior systems, someone estimates these once. I implemented an Expectation-Maximization algorithm that re-learns these probabilities from the actual data on a nightly schedule, with no labeled training pairs required. The model stays accurate as data characteristics change.
 
-There remains a significant need for an MDM system that: (1) applies nine independent blocking strategies in union to minimize candidate miss rate; (2) continuously learns match probability parameters from data using the Expectation-Maximization algorithm without labeled training sets; (3) guarantees provisional golden identity assignment for every ingested record regardless of review status; (4) detects and corrects cluster membership drift triggered by attribute updates; and (5) applies a cascading three-stage match pipeline combining deterministic, probabilistic, and AI-enhanced matching.
+**On the null golden state:** Every existing commercial MDM system I reviewed has this gap. A record in review has no golden ID. I fixed it with what I call the Provisional Golden Identity pattern — every record gets a golden ID at the moment it's first written to the database, period. If a human later approves a merge, the provisional ID is retired. If they reject, the provisional becomes permanent. Either way the record is always findable.
+
+**On cluster drift:** Nobody has published a solution to post-assignment drift in MDM systems. When I looked through prior art, I found papers on the initial matching problem and on survivorship, but nothing on what happens when the attributes that justified a cluster membership change. I built a re-evaluation algorithm that fires on every attribute update and checks whether the updated record still statistically belongs to its cluster.
 
 ---
 
 ## SUMMARY OF THE INVENTION
 
-The present invention provides a system and method for enterprise Master Data Management comprising a novel combination of technical innovations that collectively address the limitations of the prior art described above.
+The invention is a complete enterprise MDM platform called Averio MDM, implemented as a Java Spring Boot application. It introduces five technical innovations that I believe are novel to the field:
 
-In a first aspect, the invention provides a **Nine-Strategy Union Blocking Engine** that generates blocking keys using nine independent strategies applied in union to a party record, storing the resulting inverted index in dual concurrent hash maps, thereby reducing candidate comparison space from O(N²) to O(N×k) where k is typically 10–100 candidates per query.
+**1. Nine-Strategy Union Blocking.** Instead of one or two blocking strategies, the system generates keys from nine independent strategies and takes their union. Any single strategy overlap is enough to bring a candidate into scope. This dramatically improves recall on messy real-world data without sacrificing the O(N×k) complexity bound.
 
-In a second aspect, the invention provides a **Self-Calibrating Fellegi-Sunter Parameter Estimation System** using an Expectation-Maximization (EM) algorithm that runs autonomously on a schedule to learn m-probability (P(agreement | true match)) and u-probability (P(agreement | true non-match)) for ten entity attributes without requiring human-labeled training pairs.
+**2. Self-Calibrating EM Parameter Estimation.** The Fellegi-Sunter match model calibrates itself nightly using an Expectation-Maximization algorithm. It learns from the actual data in the system — no labeled training pairs, no consultant re-engagement. The model adapts as data quality improves and as new source systems are added.
 
-In a third aspect, the invention provides a **Three-Stage Cascading Match Pipeline** comprising a deterministic stage, a probabilistic Fellegi-Sunter stage, and an optional AI-enhanced stage using a Large Language Model, with threshold-driven action routing that determines whether a candidate pair should be auto-linked, sent to steward review, or treated as a new entity.
+**3. Three-Stage Cascading Match Pipeline.** Records flow through three matching stages: deterministic (exact identifier match), probabilistic (Fellegi-Sunter weighted scoring), and AI-enhanced (Large Language Model disambiguation for ambiguous cases only). The LLM is invoked only for scores in the uncertain range [0.5, 0.9], preserving the speed and accuracy of the first two stages for the majority of decisions.
 
-In a fourth aspect, the invention provides a **Provisional Golden Identity Management System** that guarantees every ingested record is assigned a globally unique golden identifier before any persistence operation commits to the database, eliminating the null golden state entirely and ensuring downstream application availability throughout the steward review lifecycle.
+**4. Provisional Golden Identity.** Every record gets a globally unique golden identifier before any database transaction commits. There is no null golden state at any point in the record lifecycle. Records pending review are fully available to downstream applications, the timeline service, the survivorship engine, and the blocking index from the moment they are written.
 
-In a fifth aspect, the invention provides a **Post-Update Probabilistic Cluster Drift Detector** that re-evaluates a party's statistical fit within its assigned golden cluster whenever the party's attributes are updated, and automatically initiates reassignment, steward escalation, or new cluster creation based on updated match scores.
-
-In a sixth aspect, the invention provides a **Human-in-the-Loop ML Retraining Pipeline** that captures feature vectors at steward decision time, stores them as immutable feedback records, and automatically retrains a logistic regression match model when sufficient labeled examples accumulate.
-
-In a seventh aspect, the invention provides a **Query-Time Survivorship Rule Engine** that applies pluggable per-attribute survivorship strategies (including Source Priority, Most Recent, Most Frequent, Supremacy, Non-Null, and Longest) at golden record retrieval time rather than pre-computing a static golden record, enabling dynamic rule configuration without cache invalidation at the data layer.
+**5. Post-Update Cluster Drift Detection.** After every attribute update, the system re-evaluates whether the updated record still statistically belongs to its current cluster. If it has drifted, the system automatically reassigns it, escalates to human review, or creates a new cluster — and records the entire event chain as immutable timeline documents.
 
 ---
 
 ## BRIEF DESCRIPTION OF THE DRAWINGS
 
-**FIG. 1** is a system architecture diagram illustrating the overall Averio MDM platform components including the blocking engine, matching pipeline, survivorship engine, and data stores.
+**FIG. 1** is a system architecture diagram showing the Averio MDM platform components — the blocking engine, three-stage match pipeline, survivorship engine, and data stores (Neo4j graph database and Azure Cosmos DB).
 
-**FIG. 2** is a flowchart of the nine-strategy blocking key generation process for a single Party record.
+**FIG. 2** is a flowchart showing how the nine blocking key strategies are applied to a single party record to produce the candidate pool.
 
-**FIG. 3** is a flowchart of the three-stage cascading match pipeline with threshold-driven action routing.
+**FIG. 3** is a flowchart of the three-stage cascading match pipeline showing threshold-driven routing to auto-link, steward review, and new entity creation.
 
-**FIG. 4** is a diagram of the Expectation-Maximization parameter estimation algorithm showing the E-step and M-step iterations for ten attributes.
+**FIG. 4** is a diagram of the Expectation-Maximization parameter estimation algorithm — the E-step computing posterior match probabilities and the M-step updating m and u estimates.
 
 **FIG. 5** is a flowchart of the post-update cluster drift detection and remediation process.
 
-**FIG. 6** is a data model diagram showing the relationship between Party nodes, GoldenRecord documents, and TimelineEvent documents across Neo4j and Azure Cosmos DB.
+**FIG. 6** is a data model diagram showing the relationship between Party nodes in Neo4j, GoldenRecord documents, and TimelineEvent documents in Cosmos DB.
 
-**FIG. 7** is a flowchart of the provisional golden identity assignment lifecycle from ingest through steward resolution.
+**FIG. 7** is a flowchart of the provisional golden identity lifecycle — from first ingest through steward merge approval or rejection.
 
-**FIG. 8** is a diagram of the human-in-the-loop ML retraining feedback cycle.
+**FIG. 8** is a diagram of the human-in-the-loop ML retraining feedback cycle showing feature capture at decision time and automatic logistic regression retraining.
 
 ---
 
-## DETAILED DESCRIPTION OF THE PREFERRED EMBODIMENTS
+## DETAILED DESCRIPTION
 
-### I. SYSTEM OVERVIEW
+### I. SYSTEM ARCHITECTURE
 
-The Averio MDM platform comprises a Spring Boot Java application deployed on Microsoft Azure, utilizing Neo4j as a graph database for entity relationships and party records, Azure Cosmos DB for document storage of golden records, timeline events, matching feedback, and governance policies, and an in-memory concurrent hash map structure for real-time blocking index operations.
+Averio MDM runs as a Spring Boot 3.x application on Java 21, deployed on Microsoft Azure. The data layer uses two stores deliberately chosen for different access patterns:
 
-The platform is organized into the following principal subsystems:
-- **Ingest Pipeline** (`PartyService.ingestParty()`)
-- **Blocking Engine** (`BlockingKeyService`)
-- **Matching Engine** (`MatchingEngine`, `ProbabilisticMatcher`, `AIEnhancedMatcher`)
-- **EM Parameter Estimation** (`EMAlgorithmService`)
-- **Survivorship Engine** (`SurvivorshipEngine`)
-- **Golden Record Service** (`GoldenRecordService`)
-- **Timeline Service** (`TimelineService`)
-- **ML Matching Service** (`MLMatchingService`)
-- **Steward Service** (`StewardService`)
-- **Test Laboratory** (`TestRunnerService`, seven test suites)
+- **Neo4j** (graph database) stores Party nodes and their relationships. Graph traversal is used for hierarchy resolution, relationship management, and blocking index candidate retrieval when party relationships are relevant.
+- **Azure Cosmos DB** (document database) stores golden records, timeline events, matching feedback, survivorship rules, steward tasks, and audit logs. Document storage is appropriate here because these are semi-structured, append-heavy, and queried by ID.
+- **In-memory concurrent hash maps** store the blocking index. The index must support microsecond lookup times that a database cannot provide at scale.
+
+The platform's principal services are:
+
+- `PartyService` — ingest pipeline, update handling, drift detection trigger
+- `BlockingKeyService` — nine-strategy key generation, dual-map index maintenance
+- `MatchingEngine` — orchestrates the three-stage pipeline
+- `ProbabilisticMatcher` — Fellegi-Sunter weighted scoring with 20+ similarity algorithms
+- `AIEnhancedMatcher` — LLM-based disambiguation stage
+- `EMAlgorithmService` — nightly self-calibrating parameter estimation
+- `SurvivorshipEngine` — query-time golden record assembly from source records
+- `GoldenRecordService` — golden record creation, refresh, and view-scoped retrieval
+- `MLMatchingService` — feature capture, logistic regression training, and model scoring
+- `StewardService` — human review task lifecycle management
+- `TimelineService` — immutable event recording for all state changes
+- `ClusterMergeService` — transitive Union-Find cluster formation
+
+---
 
 ### II. NINE-STRATEGY UNION BLOCKING ENGINE
 
-#### II.A. The Computational Problem
+#### II.A. Why Nine Strategies
 
-For an enterprise with N party records, naïve pairwise matching requires O(N²) comparisons. The blocking engine reduces the candidate set for any incoming record to O(k) candidates where k is bounded by the sum of bucket sizes across all matching blocking keys.
+Single-strategy blocking fails when data quality varies. Consider a customer record where:
+- The name is spelled "Johnsen" in the CRM but "Johnson" in the billing system
+- The phone number stored in each system has a different area code
+- The address was updated in one system but not the other
 
-#### II.B. Blocking Key Generation
+With phonetic name blocking alone, these two records share no bucket if the phonetic encoding diverges. With address blocking alone, they miss. But with nine strategies, the shared email domain, the shared last-seven digits of a backup phone number, or the shared tax ID prefix will create at least one matching bucket — and the union of all strategy buckets is the candidate pool.
 
-For each Party record, the system generates blocking keys using nine independent strategies. The keys are computed by `BlockingKeyService.generateKeys(Party party)`:
+The performance cost of nine strategies is minimal because keys are short strings and hash map lookups are O(1). The recall improvement on real enterprise data is substantial.
 
-**Strategy 1 — Token Double Metaphone (`DM:<code>`):**  
-Each whitespace-tokenized word in the party's primary name (organization name, full name, or first+last) is encoded using the Double Metaphone phonetic algorithm. Each resulting code is prefixed with `"DM:"` and added to the key set. This strategy handles phonetic name variations (e.g., "Johnson" and "Jonson" produce the same DM code).
+#### II.B. The Nine Strategies
 
-**Strategy 1b — Nickname Variant Double Metaphone:**  
-For individual party types, the `NicknameService` expands the first name into all equivalent forms (e.g., "Bob" → {"Bob", "Robert", "Rob", "Bobby", "Robby"}) and generates additional `DM:` keys for each variant. This novel extension ensures that "Bob Smith" and "Robert Smith" share at least one blocking key.
+For each incoming Party record, `BlockingKeyService.generateKeys(Party party)` produces a set of string keys:
 
-**Strategy 2 — Full Collapsed Name Double Metaphone (`DMF:<code>`):**  
-All whitespace is removed from the normalized name before DM encoding (e.g., "John Smith" → "JohnSmith" → DM code). This captures cases where tokenization differs between source systems.
+**Strategy 1 — Double Metaphone of Name Tokens (`DM:<code>`):**
+Each whitespace-separated token in the party's name (using `organizationName` for organizations, `firstName + lastName` for individuals) is encoded with the Double Metaphone algorithm. Each code is prefixed `DM:` and added to the key set. "Johnson" and "Jonsen" both produce `DM:JNSN`.
 
-**Strategy 3 — First Initial Plus Last Token Phonetic (`FI:<c>:<code>`):**  
-The first character of the first name token and the DM code of the last name token are combined (e.g., "J:SM0"). Nickname expansion is also applied to the first token, generating additional FI: keys per variant.
+**Strategy 1b — Nickname Variant Phonetic Keys:**
+For individual records, `NicknameService.variants(firstName)` returns all equivalent name forms from a table of 90+ equivalence groups. Each variant gets its own `DM:` key. This means "Bob Smith" and "Robert Smith" share at least one blocking key even though "Bob" and "Robert" produce different phonetic codes.
 
-**Strategy 4 — Date of Birth Year-Month Plus Initial (`DOB:<y>-<m>:<c>`):**  
-For parties with a known date of birth, the year, month, and first character of the primary name initial are combined. This strategy is highly discriminating for individual records with date-of-birth data.
+**Strategy 2 — Collapsed Full Name Phonetic (`DMF:<code>`):**
+All whitespace is stripped from the normalized name before Double Metaphone encoding. "John Smith" becomes "JohnSmith" before encoding. This handles cases where token boundaries differ between source systems.
 
-**Strategy 5 — Tax Identifier Prefix (`TAX:<4digits>`):**  
-The first four digits of the Tax ID or EIN (after stripping non-numeric characters) form a blocking key. This provides a strong signal for organizations where the tax ID is partially known.
+**Strategy 3 — First Initial Plus Last Token Phonetic (`FI:<c>:<code>`):**
+The first character of the first name and the Double Metaphone code of the last name token are combined. "J:SM0" would be a typical key. Nickname expansion is applied to the first token, generating additional FI: keys per variant.
 
-**Strategy 6 — Phone Number Suffix (`PH7:<7digits>`):**  
-The last seven digits of each phone number across all phone types in the party's phone map are used as blocking keys. This is effective when area codes differ between source systems.
+**Strategy 4 — Date-of-Birth Year-Month Plus Name Initial (`DOB:<yyyy>-<mm>:<c>`):**
+For parties with a known date of birth, year, month, and the initial of the primary name are combined. This is highly discriminating — it only matches parties born in the same month with the same name initial.
 
-**Strategy 7 — Email Domain Plus Initial (`EM:<domain>:<c>`):**  
-The email domain extracted from the `@` delimiter and the first character of the primary name are combined. This is effective for corporate records where multiple employees share a domain.
+**Strategy 5 — Tax Identifier Prefix (`TAX:<4digits>`):**
+The first four digits of the Tax ID or EIN (after stripping hyphens and spaces) form a blocking key. This is effective for organizations where the full tax ID is not always populated.
 
-**Strategy 8 — Postal Code Prefix Plus Phonetic (`ZIP:<5chars>:<code>`):**  
-The first five alphanumeric characters of the primary address postal code, combined with the DM code of the first name token, create a geographically-scoped phonetic key.
+**Strategy 6 — Phone Number Suffix (`PH7:<7digits>`):**
+The last seven digits of each phone number across all of the party's phone entries are used as blocking keys. Seven-digit suffixes are consistent across area codes, which often differ between source systems.
 
-**Strategy 9 — Exact High-Cardinality Identifiers (`DUNS:<#>`, `LEI:<#>`, `NID:<#>`):**  
-DUNS number, LEI (Legal Entity Identifier), and National ID are stored verbatim as blocking keys after character normalization. Because these identifiers are globally unique, a bucket hit is near-deterministic.
+**Strategy 7 — Email Domain Plus Name Initial (`EM:<domain>:<c>`):**
+The domain portion of the email address (the part after `@`) and the first character of the primary name are combined. This works well for corporate records where multiple contacts share a company domain.
 
-#### II.C. Dual-Map Index Structure
+**Strategy 8 — Postal Code Prefix Plus Phonetic (`ZIP:<5chars>:<code>`):**
+The first five characters of the primary address postal code and the Double Metaphone code of the first name token are combined. This scopes phonetic matches geographically.
 
-Two concurrent hash maps are maintained in memory:
+**Strategy 9 — Exact High-Cardinality Identifiers (`DUNS:<#>`, `LEI:<#>`, `NID:<#>`):**
+DUNS number, Legal Entity Identifier, and National ID are stored verbatim as blocking keys after character normalization. A bucket hit on these is essentially a definite match signal on its own.
+
+#### II.C. Dual-Map Index
+
+Two `ConcurrentHashMap` instances are maintained in application memory:
 
 ```
 inverted_index: Map<String(blockingKey), Set<String(globalId)>>
-forward_index:  Map<String(globalId), Set<String(blockingKey)>>
+forward_index:  Map<String(globalId),   Set<String(blockingKey)>>
 ```
 
-The forward index enables O(1) key removal when a party is deleted or merged, without scanning the inverted index. The inverted index enables O(k) candidate retrieval for any incoming party.
+The forward index exists specifically to support efficient deletion. When a party is deleted or merged, `removeParty(globalId)` uses the forward index to find all of that party's keys in O(|keys|) time, then removes them from the inverted index. Without the forward index, deletion would require a full scan of the inverted index.
 
-The union of all matching buckets across all nine strategies' keys forms the candidate pool. This union-over-strategies approach maximizes recall: a candidate is surfaced if it shares *any* blocking key with the probe record, not all. Precision is controlled at the subsequent scoring stage.
+The candidate pool for any incoming record is the union of all bucket members across all strategy keys, minus the probe record itself.
 
-#### II.D. Index Maintenance
-
-- `indexParty(Party p)`: Removes any existing keys for the party via the forward index, then regenerates and adds all keys.
-- `removeParty(String globalId)`: Uses the forward index to retrieve and delete all inverted index entries for the party in O(|keys|) time.
-- `rebuildIndexAsync()`: Asynchronous full rebuild from Neo4j golden records for post-bulk-import consistency.
-- `findCandidates(Party p)`: Returns the union of all bucket members minus the probe party itself.
+---
 
 ### III. SELF-CALIBRATING FELLEGI-SUNTER PARAMETER ESTIMATION
 
-#### III.A. The Fellegi-Sunter Model
+#### III.A. The Core Model
 
-The Fellegi-Sunter (1969) probabilistic record linkage framework assigns a match weight to each comparison vector γ = (γ₁, ..., γₖ) where γᵢ ∈ {0, 1} indicates agreement on attribute i. The log-likelihood ratio weight for attribute i is:
+The Fellegi-Sunter framework assigns a composite weight to a comparison between two records. For each attribute i, the log-likelihood ratio contribution is:
 
 ```
 w_i = γ_i × ln(m_i / u_i) + (1 - γ_i) × ln((1 - m_i) / (1 - u_i))
 ```
 
-where m_i = P(γ_i = 1 | true match) and u_i = P(γ_i = 1 | true non-match).
+where γ_i is 1 if the attribute agrees and 0 if it disagrees. The total weight is the sum across all attributes. A high total weight means the pair is likely a true match; a low weight means it is likely not.
 
-In all prior art systems, m and u are hardcoded. The present invention learns them automatically.
+The critical inputs are m_i (probability of agreement given the pair is a true match) and u_i (probability of agreement given the pair is not a true match). In every prior MDM system I reviewed, these are set manually and never updated. I built the EM algorithm to learn them automatically.
 
-#### III.B. Expectation-Maximization Algorithm
+#### III.B. What the EM Algorithm Does
 
-The `EMAlgorithmService` implements unsupervised EM parameter estimation operating on ten attributes across four categories:
+`EMAlgorithmService` runs nightly at 02:00 UTC. For each party type in the system, it:
 
-**Name attributes (indices 0–1):** firstName (IDX_FIRST_NAME=0), lastName (IDX_LAST_NAME=1)  
-**Temporal (index 2):** dateOfBirth (IDX_DOB=2)  
-**Identifiers (index 3):** taxId/EIN/SSN (IDX_TAX_ID=3)  
-**Contact (indices 4–5):** email (IDX_EMAIL=4), phone (IDX_PHONE=5)  
-**Organization (index 6):** organizationName (IDX_ORG_NAME=6)  
-**Geographic (index 7):** postalCode (IDX_POSTAL=7)  
-**Phonetic (indices 8–9):** phonetic firstName (IDX_PHONETIC_FN=8), phonetic lastName (IDX_PHONETIC_LN=9)
+1. **Draws a sample** of 5,000 random party pairs from Neo4j using reservoir sampling.
 
-**Algorithm Steps:**
+2. **Computes a 10-dimensional binary agreement vector** for each pair across these attributes:
+   - firstName (index 0): Jaro-Winkler ≥ 0.85
+   - lastName (index 1): Jaro-Winkler ≥ 0.85
+   - dateOfBirth (index 2): exact match
+   - taxId (index 3): exact match after normalization
+   - email (index 4): exact match after lowercasing
+   - phone (index 5): last-7-digit match
+   - organizationName (index 6): Jaro-Winkler ≥ 0.80
+   - postalCode (index 7): first-5-character match
+   - phonetic firstName (index 8): Double Metaphone match
+   - phonetic lastName (index 9): Double Metaphone match
 
-1. **Sampling:** N random pairs are drawn from Neo4j golden party records using reservoir sampling. Default N=5,000 pairs.
-
-2. **Feature vector computation:** For each pair (A, B), a 10-dimensional binary agreement vector γ is computed. Agreement is defined per attribute: exact match for identifiers, Jaro-Winkler ≥ 0.85 for names, phonetic match for phonetic attributes.
-
-3. **Initialization:** m and u vectors are initialized to domain-expert prior values:
-
+3. **Initializes** m and u to domain expert priors:
 ```
-Default m (P(agree | match)):    [0.95, 0.92, 0.88, 0.99, 0.85, 0.82, 0.90, 0.75, 0.89, 0.86]
-Default u (P(agree | non-match)): [0.15, 0.10, 0.02, 0.01, 0.03, 0.04, 0.08, 0.12, 0.14, 0.09]
-```
-
-4. **E-Step:** For each pair i, compute the posterior probability that it is a true match:
-
-```
-log_match_i = ln(π) + Σ_k [γ_ik × ln(m_k) + (1-γ_ik) × ln(1-m_k)]
-log_nomatch_i = ln(1-π) + Σ_k [γ_ik × ln(u_k) + (1-γ_ik) × ln(1-u_k)]
-maxLog = max(log_match_i, log_nomatch_i)
-P(match_i) = exp(log_match_i - maxLog) / [exp(log_match_i - maxLog) + exp(log_nomatch_i - maxLog)]
+m (P(agree | match)):     [0.95, 0.92, 0.88, 0.99, 0.85, 0.82, 0.90, 0.75, 0.89, 0.86]
+u (P(agree | non-match)): [0.15, 0.10, 0.02, 0.01, 0.03, 0.04, 0.08, 0.12, 0.14, 0.09]
 ```
 
-The `maxLog` offset ensures numerical stability in log-space computation.
-
-5. **M-Step:** Update m, u, and π from posterior-weighted observations:
-
+4. **E-step:** For each pair, compute the posterior probability it is a true match using numerically stable log-space arithmetic:
 ```
-m_k_new = Σ_i [P(match_i) × γ_ik] / Σ_i [P(match_i)]
-u_k_new = Σ_i [(1 - P(match_i)) × γ_ik] / Σ_i [(1 - P(match_i))]
-π_new = mean(P(match_i))
+log_match   = ln(π) + Σ_k [γ_k × ln(m_k) + (1-γ_k) × ln(1-m_k)]
+log_nomatch = ln(1-π) + Σ_k [γ_k × ln(u_k) + (1-γ_k) × ln(1-u_k)]
+maxLog      = max(log_match, log_nomatch)
+P(match)    = exp(log_match - maxLog) / [exp(log_match - maxLog) + exp(log_nomatch - maxLog)]
 ```
+The `maxLog` subtraction prevents floating-point underflow in log-space, which I found was a real problem with naive implementations on large attribute vectors.
 
-6. **Convergence:** Repeat E and M steps until `‖m_new - m_old‖₁ + ‖u_new - u_old‖₁ < ε` (ε = 0.001) or maximum iterations (default 100) is reached.
-
-7. **Parameter Storage:** Results are stored as `MUParameters(double[] m, double[] u, double pi, String partyType, LocalDateTime learnedAt)` in a per-party-type concurrent hash map.
-
-8. **Scheduled Re-estimation:** The `@Scheduled(cron = "0 0 2 * * *")` annotation triggers nightly re-estimation at 02:00 UTC for all party types with sufficient data.
-
-#### III.C. Sanity Guard
-
-Before accepting EM-estimated parameters in the scoring pipeline, the system applies the guard:
-
-```java
-if (m > u && m > 0.5 && u < 0.5) return new double[]{m, u};
-return prior;  // revert to prior if EM values unsensible
+5. **M-step:** Update the parameters from the posterior-weighted observations:
+```
+m_k = Σ_i [P(match_i) × γ_ik] / Σ_i [P(match_i)]
+u_k = Σ_i [(1 - P(match_i)) × γ_ik] / Σ_i [(1 - P(match_i))]
+π   = mean(P(match_i))
 ```
 
-This prevents statistically aberrant EM results (e.g., from sparse data or early iterations) from degrading match quality.
+6. **Iterate** until convergence (`||m_new - m_old||₁ + ||u_new - u_old||₁ < 0.001`) or 100 iterations maximum.
+
+7. **Validate** before accepting: if `m_k > u_k && m_k > 0.5 && u_k < 0.5` for all k, accept. Otherwise revert to priors. This guard prevents statistically aberrant results from a sparse early data sample from degrading match quality.
+
+8. **Store** results per party type with timestamp in a `ConcurrentHashMap<String, MUParameters>`.
+
+---
 
 ### IV. THREE-STAGE CASCADING MATCH PIPELINE
 
-#### IV.A. Architecture
+#### IV.A. Stage 1 — Deterministic Matching
 
-`MatchingEngine.scoreAgainstPool()` applies three stages in sequence:
+The first stage is not probabilistic — it's a lookup. If the probe record and a candidate share any of: SSN, Tax ID/EIN, DUNS number, LEI, passport number, or national ID (exact match after normalization), the score is set to 1.0 and the match method is recorded as `DETERMINISTIC`. There is also a deduplication check: if the probe and candidate share both `sourceSystem` and `sourceSystemId`, the score is 1.0 and method is `SOURCE_DEDUP`. This prevents re-ingesting the same source record twice.
 
-**Stage 1 — Deterministic Matching:**
-Critical unique identifiers are compared first: SSN, Tax ID, EIN, DUNS number, LEI, passport number, and national ID. If any identifier matches exactly between the probe and a candidate, the score is set to 1.0 (definite match) and deterministic method is recorded. An additional deterministic rule fires when the probe and candidate share both `sourceSystem` and `sourceSystemId`, preventing duplicate ingest from the same source.
+Stage 1 exits immediately for any deterministic match — it doesn't proceed to Stage 2.
 
-**Stage 2 — Probabilistic Fellegi-Sunter Scoring:**
-`ProbabilisticMatcher.scoreIndividual()` or `scoreOrganization()` is invoked for non-deterministic candidates. The scorer applies 20+ similarity algorithms across name, date-of-birth, contact, and identifier attributes, maps each comparison outcome to a Fellegi-Sunter log-likelihood contribution, and normalizes the total to [0, 1].
+#### IV.B. Stage 2 — Probabilistic Fellegi-Sunter Scoring
 
-The 20+ similarity algorithms include:
-- Jaro-Winkler similarity for first name, last name, and organization name
-- Token Sort Ratio (alphabetically sorted tokens before JW) for word-order invariance
-- Token Set Ratio (Jaccard over token sets + JW) for abbreviation handling
-- Bigram Jaccard similarity (2-gram character overlap)
-- Trigram Jaccard similarity (3-gram character overlap)
-- Composite name similarity (max of multiple metrics with phonetic boost)
-- Damerau-Levenshtein / Optimal String Alignment distance (four operations: substitution, insertion, deletion, transposition)
+`ProbabilisticMatcher` applies 20+ similarity algorithms across attribute categories, maps each comparison to a Fellegi-Sunter log-likelihood contribution using the EM-learned m and u parameters, and normalizes the total to [0, 1].
+
+The similarity algorithms include:
+- Jaro-Winkler for name fields (first name, last name, organization name)
+- Token Sort Ratio: alphabetically sort tokens before Jaro-Winkler — handles word-order differences ("Smith, John" vs "John Smith")
+- Token Set Ratio: Jaccard similarity over token sets plus Jaro-Winkler — handles abbreviations
+- Bigram Jaccard: 2-character overlap ratio
+- Trigram Jaccard: 3-character overlap ratio
+- Composite name similarity: maximum of multiple metrics with a phonetic boost when Double Metaphone codes match
+- Damerau-Levenshtein / Optimal String Alignment: handles the four edit operations (substitution, insertion, deletion, transposition) for catching typos
 - TF-IDF cosine similarity over character n-gram vectors
-- Double Metaphone phonetic encoding
-- Nickname equivalence lookup (90+ name variant groups)
+- Double Metaphone phonetic match
+- Nickname equivalence: 1.0 if names are known equivalents (e.g., Bob/Robert), 0.0 otherwise
 
-**Stage 3 — AI-Enhanced Disambiguation (Novel):**
-If the probabilistic score falls in the uncertain range [0.5, 0.9] AND the active matching rule has `useAIEnhancement = true`, the system calls `AIEnhancedMatcher.score(partyA, partyB)`. The matcher constructs a structured prompt containing both records' key attributes and requests:
+#### IV.C. Stage 3 — AI-Enhanced Disambiguation
+
+Stage 3 is only invoked when: (a) the probabilistic score is in the ambiguous range [0.5, 0.9] and (b) the active matching rule has `useAIEnhancement = true`.
+
+`AIEnhancedMatcher.score(partyA, partyB)` constructs a structured prompt with both records' key attributes and requests a numeric score and brief rationale:
 
 ```
 SCORE:<0.00-1.00>|REASON:<brief explanation>
 ```
 
-The final score is a weighted blend: `0.6 × probabilistic_score + 0.4 × ai_score`. The method is recorded as `AI_ENHANCED`.
+The final blended score is `0.6 × probabilistic_score + 0.4 × ai_score`. The LLM adds value specifically in cases that are ambiguous to pure statistical methods — for example, distinguishing "IBM" from "IBM Global Services" when the tax IDs are not populated and the address is slightly different.
 
-#### IV.B. Threshold-Driven Action Routing
+Using LLM matching for the full candidate pool would be too expensive and too slow. Using it only for the uncertain range makes the cost bounded and predictable.
 
-The top-scoring candidate and its score determine the ingest action:
+#### IV.D. Routing Thresholds
 
-| Score Range | Action | Meaning |
-|---|---|---|
-| ≥ 0.95 | `AUTO_LINK` | Definite match — link to candidate's golden cluster |
-| 0.75 – 0.94 | `SEND_TO_STEWARD` | Probable match — human review required |
-| < 0.75 | `CREATE_NEW` | No match — new independent entity |
+After scoring, the top candidate's score drives the routing decision:
 
-Thresholds are configurable per `MatchingRule` entity, allowing different sensitivity for different entity types or source systems.
+| Score | Action |
+|---|---|
+| ≥ 0.95 | AUTO_LINK — merge to existing cluster |
+| 0.75 – 0.94 | SEND_TO_STEWARD — create steward review task |
+| < 0.75 | CREATE_NEW — independent new entity |
 
-### V. PROVISIONAL GOLDEN IDENTITY MANAGEMENT (NOVEL INVENTION)
+Thresholds are configurable per `MatchingRule` entity, allowing different sensitivity for different source systems or entity types.
 
-#### V.A. The Null Golden State Problem
+---
 
-In all prior art MDM systems, a party record pending steward review exists in a null golden state — it has been ingested but has no golden identifier. During review (which may take days to weeks), the record is invisible to:
-- Downstream applications querying by golden ID
-- The survivorship engine (cannot compute a golden view without a golden ID)
-- The timeline service (events indexed by golden ID cannot be recorded)
-- The blocking index (cannot be found as a candidate for future matches)
+### V. PROVISIONAL GOLDEN IDENTITY MANAGEMENT
 
-This null state violates the core MDM guarantee of universal entity availability.
+#### V.A. The Problem in Concrete Terms
 
-#### V.B. The Provisional Golden Identity
+I want to be specific about what "null golden state" means in practice, because I think it's an underappreciated problem.
 
-The present invention eliminates the null golden state entirely through the **Provisional Golden Identity** pattern:
+When a record is sent to steward review in a conventional MDM system:
+- The risk system queries by golden customer ID — gets nothing back
+- The compliance system can't record an activity against this customer
+- If another record comes in for the same person in the next 10 minutes, it goes to a second review task — but neither task knows about the other
+- Timeline events can't be indexed by golden ID because there is none
+- Downstream data warehouse feeds have a gap
 
-**For SEND_TO_STEWARD matches (score 0.75–0.94):**
+This is not a hypothetical edge case. In a large bank processing 50,000 new customer records per day, there may be thousands of records in steward review at any given time. The null golden state affects all of them.
 
-1. A provisional golden ID is generated: `newGoldenId = generateGoldenId()`.
-2. The incoming party is assigned this provisional ID: `incoming.setGoldenRecordId(provisionalGoldenId)`.
-3. The party is saved to Neo4j with `isGolden = false` (source record designation).
-4. `GoldenRecordService.createNewGoldenRecord(provisionalGoldenId, List.of(saved))` is immediately called, creating a complete golden record with survivorship rules applied.
-5. The provisional golden party is added to the blocking index: `indexParty(saved)`.
-6. A steward task is created with `candidateIds = [existingCandidateGoldenId, provisionalGoldenId]`.
+#### V.B. The Solution
 
-**During the review period:**
-The provisional record is fully available: it has a golden ID, a golden record, appears in blocking index candidates, and receives timeline events.
+When `PartyService.ingestParty()` routes a new record to `SEND_TO_STEWARD`:
 
-**Upon steward APPROVE_MERGE:**
-`StewardService.executeResolution()` calls `mergeGoldenRecords(survivingGoldenId, provisionalGoldenId)`. The party is re-pointed to the surviving golden ID. The provisional golden ID is retired.
+1. `generateGoldenId()` is called — produces a zero-padded random numeric string (e.g., `0000000012847593`)
+2. The incoming party is assigned this provisional golden ID: `incoming.setGoldenRecordId(provisionalId)`
+3. The party is saved to Neo4j with `isGolden = false` (marking it as a source record, not the cluster representative)
+4. `GoldenRecordService.createNewGoldenRecord(provisionalId, List.of(savedParty))` is called immediately — a complete golden record is assembled with survivorship rules applied from this single source record
+5. The provisional record is added to the blocking index: `indexParty(savedParty)`
+6. A steward task is created with `candidateIds = [existingCandidateGoldenId, provisionalGoldenId]`
 
-**Upon steward REJECT_MERGE:**
-The provisional golden ID becomes the permanent golden ID. The record remains its own independent entity. No additional action required.
+From this point, `provisionalId` works exactly like any permanent golden ID. The record is retrievable, it can receive timeline events, it shows up as a candidate for future matches, and the survivorship engine can assemble a golden view from it.
 
-This design guarantees: **every party record has a golden identifier at all times, from the moment of first database commit.**
+**If the steward approves the merge:**
+`StewardService.executeResolution()` calls `mergeGoldenRecords(survivingId, provisionalId)`. The party record is re-pointed to `survivingId`. The provisional golden record is deleted or archived. The surviving cluster's golden record is refreshed.
 
-#### V.C. Client-Supplied Golden Identity (Migration Path)
+**If the steward rejects the merge:**
+No action needed. `provisionalId` becomes the permanent golden ID for this record. The review task is closed.
 
-When migrating existing data from legacy systems, clients may supply their own golden identifiers:
+**The guarantee:** Every party record written to the database has a valid golden identifier at all times. There is no window — not even for a fraction of a second — where a record exists without an identity.
+
+#### V.C. Client-Supplied Identity Migration
+
+For migrating from legacy systems with existing identifiers:
 
 ```json
 POST /api/v1/parties/ingest
-{
-  "goldenRecordId": "ORACLE-SEQ-10004231",
-  ...
-}
+{ "goldenRecordId": "LEGACY-CUST-10004231", ... }
 ```
 
-When `goldenRecordId` is non-blank in the ingest payload, the matching engine is bypassed entirely and the supplied identifier is used as-is. This enables zero-downtime migration of existing identity systems into Averio MDM.
+When `goldenRecordId` is non-blank in the ingest payload, the matching engine is skipped entirely and the supplied identifier is used as the golden ID. This allows organizations to migrate existing customer master data into Averio MDM without losing their existing identity keys.
 
-### VI. POST-UPDATE PROBABILISTIC CLUSTER DRIFT DETECTION (NOVEL INVENTION)
+---
 
-#### VI.A. The Drift Problem
+### VI. POST-UPDATE CLUSTER DRIFT DETECTION
 
-Entity attributes are not static. A phone number may be corrected, an address updated, a tax ID completed, or a name formally changed. After any such update, the statistical basis on which a party was originally clustered may no longer hold. No known MDM system detects or responds to this condition automatically.
+#### VI.A. The Problem
 
-#### VI.B. Drift Detection Algorithm
+Here's a scenario that happens more often than it should:
 
-`PartyService.reEvaluatePartyPlacement(Party party, String updatedBy)` is invoked after every `updateParty()` operation. The algorithm:
+Two records for different entities both had the phone number `+1-212-555-0100` in the source systems. They were merged into the same cluster on the strength of that phone match. Later, one record gets corrected — it turns out that was a data entry error, the real number is `+1-415-555-0200`. The cluster membership is now wrong. The records no longer have matching attributes, but the merge stays.
 
-**Step 1 — Intra-Cluster Scoring:**  
-Retrieve all sibling parties sharing the same `goldenRecordId`, excluding the updated party itself.
+In every commercial MDM system I looked at, this stays wrong indefinitely unless a data steward happens to manually review it. There's no automated detection of this condition.
 
+I built `PartyService.reEvaluatePartyPlacement()` specifically to catch this.
+
+#### VI.B. The Detection Algorithm
+
+`reEvaluatePartyPlacement(Party party, String updatedBy)` is called at the end of every `updateParty()` operation.
+
+**Step 1 — Score against current cluster siblings:**
 ```java
 List<Party> siblings = partyRepository.findByGoldenRecordId(currentGoldenId)
-    .stream().filter(s -> !s.getGlobalId().equals(party.getGlobalId()))
+    .stream()
+    .filter(s -> !s.getGlobalId().equals(party.getGlobalId()))
     .collect(Collectors.toList());
 ```
+Run the matching engine against all siblings. Record `bestSiblingScore`.
 
-Score the updated party against each sibling using `matchingEngine.findMatches(party, siblings, null)`. Extract `bestSiblingScore`.
+**Step 2 — Threshold check:**
+If `bestSiblingScore >= 0.75`, the updated record still statistically belongs in its cluster. Return. Nothing to do — this is the common case and it exits cheaply.
 
-**Step 2 — Drift Threshold Test:**  
-If `bestSiblingScore >= REVIEW_THRESHOLD (0.75)`, no drift is detected. The party still statistically belongs in its cluster. Return early. **No action taken for the common case.**
-
-**Step 3 — External Candidate Search (Drift Confirmed):**  
-If drift is confirmed (`bestSiblingScore < 0.75`), execute the full blocking + scoring pipeline against the global golden record pool:
-
+**Step 3 — External candidate search (drift confirmed):**
+If `bestSiblingScore < 0.75`, drift is confirmed. Run full blocking + scoring against all golden clusters:
 ```java
 MatchingEngine.MatchResult externalResult = matchingEngine.findMatchesWithBlocking(party, null);
 ```
+Filter to candidates in a *different* golden cluster than the current one.
 
-Filter results to candidates belonging to a *different* golden cluster than the current one.
+**Step 4 — Remediation:**
 
-**Step 4 — Drift Remediation (Three-Branch):**
+| Condition | Action |
+|---|---|
+| External score ≥ 0.95 | Auto-reassign to external cluster |
+| External score 0.75–0.94 | Send to steward for review |
+| No qualifying external match | Detach to new golden cluster |
 
-| Condition | Action | Timeline Events |
-|---|---|---|
-| `externalScore >= 0.95` | `reassignPartyToGolden()` — auto-reassign | `PARTY_LEFT_CLUSTER` on old, `PARTY_JOINED_CLUSTER` on new |
-| `externalScore 0.75–0.94` | `createMatchReviewTask()` — send to steward | `CLUSTER_DRIFT_REVIEW_REQUESTED` |
-| No external match | `detachToNewGolden()` — create new golden | `PARTY_DETACHED_FROM_CLUSTER`, `GOLDEN_CREATED_AFTER_DRIFT` |
+**Step 5 — Refresh old cluster:**
+After any branch, `goldenRecordService.refreshGoldenRecord(currentGoldenId)` recomputes the surviving cluster's golden record without the departed party.
 
-**Step 5 — Refresh Old Golden:**  
-Regardless of branch taken, `goldenRecordService.refreshGoldenRecord(currentGoldenId)` is called to update the surviving cluster's golden record without the departed party.
+#### VI.C. Timeline Events for Cluster Changes
 
-#### VI.C. Timeline Event Architecture for Drift
+Every cluster membership change is recorded as an immutable event document in Cosmos DB, partitioned by golden record ID. This creates a complete audit trail of cluster history:
 
-All cluster membership changes are recorded as immutable `TimelineEvent` documents in Cosmos DB, partitioned by `/entityId` (golden record ID):
+- `PARTY_LEFT_CLUSTER` — recorded on the old golden ID
+- `PARTY_JOINED_CLUSTER` — recorded on the new golden ID
+- `CLUSTER_DRIFT_REVIEW_REQUESTED` — recorded on the old golden ID when sent to steward
+- `PARTY_DETACHED_FROM_CLUSTER` — recorded on the old golden ID
+- `GOLDEN_CREATED_AFTER_DRIFT` — recorded on the new golden ID
 
-- **`PARTY_LEFT_CLUSTER`**: Recorded on the *old* golden ID. Contains old score, new golden ID, triggered by.
-- **`PARTY_JOINED_CLUSTER`**: Recorded on the *new* golden ID. Contains match score, match method.
-- **`CLUSTER_DRIFT_REVIEW_REQUESTED`**: Recorded on the *old* golden ID. Contains provisional new golden ID, steward task ID.
-- **`PARTY_DETACHED_FROM_CLUSTER`**: Recorded on the *old* golden ID.
-- **`GOLDEN_CREATED_AFTER_DRIFT`**: Recorded on the *new* golden ID.
+These events enable point-in-time reconstruction of which records belonged to which cluster at any historical date — something compliance and audit teams in financial services need regularly.
 
-This creates a complete, auditable history of cluster membership changes that is queryable by golden ID, enabling compliance reporting and point-in-time reconstruction of cluster state.
+---
 
-### VII. TRANSITIVE CLUSTER MERGING VIA UNION-FIND
+### VII. TRANSITIVE CLUSTER MERGING
 
-`ClusterMergeService` resolves transitive closure in matching chains. If record A matches record B (score ≥ threshold) and record B matches record C, then A, B, and C must belong to the same cluster even if A and C have never been directly compared.
+`ClusterMergeService` handles the transitive closure problem: if A matches B and B matches C, all three belong in the same cluster even if A and C were never directly compared.
 
-The Union-Find (Disjoint Set Union) algorithm is applied:
+The Union-Find (Disjoint Set Union) algorithm handles this:
 
-1. Initialize each record as its own cluster representative.
-2. For each pair (A, B) above the link threshold, call `union(A, B)`.
-3. `union(a, b)` uses path compression and union-by-rank for O(α(N)) time per operation.
-4. `getClusters()` returns a map from representative ID to all member IDs.
+1. Initialize each record as its own root.
+2. For each pair (A, B) with score above the link threshold, call `union(A, B)`.
+3. Path compression and union-by-rank keep each `find()` at effectively O(1) amortized (the inverse Ackermann function α(N) ≈ 4 for any realistic N).
+4. `getClusters()` groups records by their root representative.
 
-This ensures: **no two records that are transitively matched remain in separate golden clusters.**
+This guarantees no two records that are transitively connected end up in separate golden clusters.
+
+---
 
 ### VIII. QUERY-TIME SURVIVORSHIP RULE ENGINE
 
-#### VIII.A. Architecture
+#### VIII.A. Why Not Pre-Compute Golden Records
 
-Golden records in Averio MDM are not pre-computed and stored as static entities. Instead, they are assembled from source records at query time by applying survivorship rules. This enables:
-- Rule changes to take effect immediately without re-computing stored records
-- Per-view golden record construction for different business units or regulatory requirements
-- Full auditability of which source record contributed each attribute
+Most MDM systems compute and store a static "golden record" — a single merged view of the best attributes from all contributing source records. The problem with this approach: if you change a survivorship rule (say, switching from "most recent wins" to "source system X always wins" for the address field), you have to recompute the golden record for every cluster that has a contributing address from source X. For millions of records, that's a batch job.
 
-#### VIII.B. Rule Types
+In Averio MDM, golden records are not stored. They are assembled from source records at query time by applying the configured survivorship rules. Rule changes take effect immediately for all subsequent retrievals — no batch recompute.
 
-The survivorship engine (`SurvivorshipEngine.buildGoldenRecord()`) applies six rule types per attribute:
+#### VIII.B. The Six Rule Types
 
-1. **SOURCE_PRIORITY:** An ordered list of source systems defines preference. The attribute value from the highest-priority available source wins.
+`SurvivorshipEngine.buildGoldenRecord()` applies one of six strategies per attribute:
+
+1. **SOURCE_PRIORITY:** The attribute value from the highest-ranked available source system wins.
 2. **MOST_RECENT:** The attribute value with the most recent `sourceLastUpdated` timestamp wins.
-3. **MOST_FREQUENT:** The attribute value that appears most frequently across source records wins (majority vote).
-4. **SUPREMACY:** A designated "supremacy source" system always wins regardless of recency or frequency.
-5. **NON_NULL:** The first non-null value across sources, ordered by source priority, wins.
-6. **LONGEST:** The longest string value wins (useful for address fields where longer usually means more complete).
+3. **MOST_FREQUENT:** Majority vote across source records — the value that appears most often wins.
+4. **SUPREMACY:** A designated source system always wins, regardless of recency or frequency.
+5. **NON_NULL:** The first non-null value from sources in priority order wins.
+6. **LONGEST:** The longest string value wins — useful for address fields where more detail is generally better.
 
 #### VIII.C. View-Scoped Golden Records
 
-When a `viewId` parameter is supplied, `GoldenRecordService.getGoldenRecordForView()` loads `SurvivorshipRule` entities filtered to that view. Different views may apply different rule sets to the same underlying source data, yielding different golden record values for different business consumers — all from a single authoritative data store.
+When a `viewId` is supplied, `GoldenRecordService.getGoldenRecordForView()` loads survivorship rules filtered to that view. Different business consumers — risk, compliance, marketing, operations — can have different rule configurations applied to the same underlying source data. A risk team might want the most conservative (most recent) address. A marketing team might want the longest address. Both get their own golden view from the same source records.
 
-### IX. HUMAN-IN-THE-LOOP ML RETRAINING PIPELINE
+---
+
+### IX. HUMAN-IN-THE-LOOP ML RETRAINING
 
 #### IX.A. Feature Capture at Decision Time
 
-When a steward makes a merge/reject decision on a steward task, `MLMatchingService.captureDecision()` is invoked. The system immediately extracts eleven core features from the current state of both party records:
+This is a subtle but important point. When a steward reviews a record pair and decides whether they match, that decision is based on the attributes as they exist at that moment. If you wait until later to extract features for training — say, you re-query the database at training time — the records may have changed. You'd be training on features that don't match what the steward actually saw.
+
+`MLMatchingService.captureDecision()` extracts and persists the feature vector at the exact moment the steward submits their decision:
 
 ```
 nameSimilarity, dobExactMatch, taxIdExactMatch, emailMatch, phoneMatch,
@@ -455,226 +457,176 @@ addressSimilarity, dunsMatch, leiMatch, nationalIdMatch,
 sourceSystemDiversity, partyTypeMatch
 ```
 
-These features are stored with the steward's label (MATCH / NO_MATCH) as an immutable `MatchingFeedback` document in Cosmos DB.
+These are stored as an immutable `MatchingFeedback` document with the steward's label (MATCH or NO_MATCH). They never change after that point, regardless of what happens to the party records later.
 
-**Critical innovation:** Features are captured at decision time rather than queried at training time. This is necessary because party attributes evolve; the feature vector that informed the steward's decision is the ground truth, not the feature vector that would be computed from current attribute values months later. This enables **replay-free retraining** — the training set can be rebuilt from stored feedback documents without requiring original party record state.
+This design enables **replay-free retraining** — the training set is fully self-contained in the feedback documents. You don't need the original party states to retrain.
 
-#### IX.B. Automatic Retraining Trigger
+#### IX.B. Automatic Retraining
 
-After each feedback capture, the system checks:
-
+After each feedback save:
 ```java
 if (feedbackCount >= MIN_EXAMPLES && feedbackCount % RETRAIN_EVERY == 0) {
     retrainModel(entityType);
 }
 ```
 
-Default values: `MIN_EXAMPLES = 5`, `RETRAIN_EVERY = 5`. This means the model retrains every five new labeled examples once a minimum threshold is met.
+With `MIN_EXAMPLES = 5` and `RETRAIN_EVERY = 5`, the model retrains every 5 labeled examples once the minimum threshold is met.
 
-#### IX.C. Logistic Regression Training
+#### IX.C. Logistic Regression Implementation
 
-The `MLMatchingService.trainModel()` method implements logistic regression:
+The retrain uses a straightforward logistic regression with gradient descent:
 
-- Feature matrix: X ∈ ℝ^(n×d), n = example count, d = 11 features
-- Target vector: y ∈ {0, 1}^n
-- Weight vector: w ∈ ℝ^(d+1) (d features + bias)
-- Gradient descent: up to 500 iterations
-- Learning rate: η = 0.1
-- L2 regularization: λ = 0.01 (applied to feature weights, not bias)
-- Prediction: ŷ = σ(w^T x) where σ is the sigmoid function
+- Feature matrix X ∈ ℝ^(n×d), d = 11 features
+- Up to 500 gradient descent iterations
+- Learning rate η = 0.1
+- L2 regularization λ = 0.01 on feature weights (not bias)
+- Convergence test on loss change
 
-After training, the system computes accuracy, precision, recall, F1 score, and per-feature importance (|w_i| / Σ|w_j|) with direction classification (POSITIVE / NEGATIVE / NEUTRAL).
+After training: accuracy, precision, recall, F1, and per-feature importance (|w_i| / Σ|w_j|) are computed and stored with the model.
 
-### X. NAME NORMALIZATION SUBSYSTEM
+---
+
+### X. NAME NORMALIZATION
 
 #### X.A. Organization Name Normalization
 
-`NameNormalizerService.normaliseOrg()` applies:
-1. **Legal suffix stripping:** 30+ legal entity suffixes in multiple languages are stripped using longest-match-first to prevent partial matches ("Corp" matching before "Corporation").
-2. **Punctuation normalization:** Commas, dots, and other punctuation are replaced with spaces.
-3. **Whitespace collapsing:** Multiple consecutive spaces are reduced to single spaces.
-4. **Lowercase conversion.**
+`NameNormalizerService.normaliseOrg()` strips legal suffixes before blocking key generation: `"IBM Corporation, Inc."` → `"ibm"`. It handles 30+ suffixes in multiple languages using longest-match-first to avoid partial matches (preventing "Corp" from matching before "Corporation" in the same string).
 
-Example: `"IBM Corporation, Inc."` → `"ibm"`, ensuring that `"IBM"`, `"IBM Corp"`, `"IBM Corporation"`, and `"IBM Inc."` all produce identical blocking keys.
+Without this, "IBM Corp" and "IBM Corporation" would produce different blocking keys and never be compared. With it, they both reduce to "ibm" and share all phonetic blocking keys.
 
-#### X.B. Nickname Equivalence Service
+#### X.B. Nickname Equivalence
 
-`NicknameService` maintains 90+ equivalence groups covering common English given names with international variants. Methods:
-- `variants(String firstName)`: Returns all equivalent forms including the input
-- `areEquivalent(String a, String b)`: Boolean equivalence test
-- `similarity(String a, String b)`: Returns 1.0 for equivalent names, 0.0 otherwise
+`NicknameService` maintains 90+ equivalence groups for common English given names with international variants. "Bob", "Robert", "Rob", "Bobby", "Robby", and "Roberto" are all members of the same group. Methods:
+- `variants(firstName)` — returns all equivalent forms
+- `areEquivalent(a, b)` — boolean equivalence check
+- `similarity(a, b)` — returns 1.0 for equivalents, 0.0 otherwise
 
-The impact: `"Bob Smith"` and `"Robert Smith"` generate overlapping blocking keys (Strategy 1b) and score higher in the probabilistic matcher via the nickname similarity feature.
+---
 
-### XI. IN-APPLICATION TEST LABORATORY (NOVEL OPERATIONAL FEATURE)
+### XI. IN-APPLICATION TEST LABORATORY
 
-The Averio MDM platform includes a built-in automated testing framework (`com.averio.mdm.testing`) that executes inside the live application against real infrastructure, enabling continuous verification without a separate testing environment.
+The platform includes a test framework (`com.averio.mdm.testing`) that runs against the live application infrastructure. This matters because tests against mocked databases frequently pass while production bugs persist — the mock is not the database.
 
-**Seven test suites:**
+Seven suites:
+1. **API_HEALTH** — connectivity checks across all services and data stores
+2. **MATCHING** — matching algorithm correctness tests (in-memory, no DB I/O)
+3. **BLOCKING** — blocking key generation and index operation tests (in-memory)
+4. **SURVIVORSHIP** — rule application correctness tests
+5. **GOLDEN_RECORD** — golden record service tests with actual Cosmos DB writes
+6. **TIMELINE** — event persistence and ordering tests with per-test cleanup
+7. **REGRESSION** — end-to-end ingest scenarios with Neo4j + Cosmos DB and automatic test data cleanup
 
-1. **API_HEALTH:** Eight connectivity checks across all data stores and services
-2. **MATCHING:** Seven in-memory matching algorithm tests (zero database I/O)
-3. **BLOCKING:** Five blocking key and index operation tests (zero database I/O)
-4. **SURVIVORSHIP:** Three survivorship rule application tests
-5. **GOLDEN_RECORD:** Four golden record service tests with Cosmos DB persistence
-6. **TIMELINE:** Four timeline event persistence and ordering tests with per-test cleanup
-7. **REGRESSION:** Five end-to-end ingest pipeline scenarios with Neo4j + Cosmos DB persistence and automatic test data cleanup
-
-All suite dependencies use `@Autowired(required=false)` with null-guard returning `SKIPPED` status for unavailable services, enabling partial test runs in degraded environments.
-
-Test data is isolated via `sourceSystem = "TEST_LAB"` and `sourceSystemId = "TEST-{runId}-{seq}"` markers, with cleanup IDs tracked per result for targeted deletion.
+Test records are isolated via `sourceSystem = "TEST_LAB"` and `sourceSystemId = "TEST-{runId}-{seq}"` markers. Dependencies use `@Autowired(required=false)` with null-guard `SKIPPED` status for unavailable services.
 
 ---
 
 ## CLAIMS
 
-### INDEPENDENT CLAIMS
+The following claims are submitted for the provisional record. These will be formalized for the non-provisional application.
 
-**Claim 1.** A computer-implemented method for entity resolution in an enterprise master data management system comprising:
-- receiving a party record from a source system, the party record comprising at least a name field and at least one identifier field;
-- generating a plurality of blocking keys from the party record using nine independent blocking key strategies applied in union, the strategies comprising: (a) phonetic encoding of individual name tokens; (b) nickname variant phonetic encoding; (c) full collapsed-name phonetic encoding; (d) first initial plus last-token phonetic encoding; (e) date-of-birth year-month plus name initial; (f) tax identifier prefix; (g) phone number suffix; (h) email domain plus name initial; and (i) exact high-cardinality organizational identifiers;
-- retrieving, from an inverted index, a candidate pool comprising all party records sharing at least one blocking key with the received party record;
-- scoring each candidate in the candidate pool using a probabilistic Fellegi-Sunter model parameterized by m-probabilities and u-probabilities that are automatically estimated by an Expectation-Maximization algorithm running on the same system without requiring human-labeled training pairs;
-- routing the top-scoring candidate to one of: auto-link, steward review, or new entity creation based on configurable threshold values; and
-- if routing to steward review, assigning a provisional globally unique golden identifier to the received party record before committing any database transaction, thereby eliminating a null golden identity state.
+**Claim 1.** A computer-implemented method for entity resolution comprising:
+- generating, from a party record, blocking keys using nine independent strategies applied in union, the strategies including phonetic name encoding, nickname variant phonetic encoding, date-of-birth hashing, tax identifier prefix, phone suffix, email domain plus initial, postal code plus phonetic, collapsed name phonetic, and exact high-cardinality identifier matching;
+- retrieving candidate records sharing at least one blocking key;
+- scoring candidates using Fellegi-Sunter parameters that are autonomously estimated by an Expectation-Maximization algorithm without labeled training data;
+- routing the top match to auto-link, steward review, or new entity creation based on configurable score thresholds; and
+- when routing to steward review, assigning a provisional globally unique golden identifier to the incoming record before committing any database transaction.
 
-**Claim 2.** A computer-implemented method for post-update cluster drift detection in an enterprise master data management system comprising:
-- detecting an attribute update operation on a party record that is a member of a golden cluster comprising a plurality of party records sharing a common golden record identifier;
-- in response to the detected update, computing match scores between the updated party record and all sibling party records in the golden cluster;
-- if the highest intra-cluster match score falls below a first threshold value, determining that statistical drift has occurred;
-- upon drift determination, executing a full blocking-key-indexed candidate search across all golden record clusters in the system to identify external candidate matches for the updated party record;
-- if an external candidate match score meets or exceeds a second threshold value, automatically reassigning the party record to the external candidate's golden cluster and recording first and second timeline events on the respective golden record identifiers; and
-- if no external match meets any threshold, detaching the party record from its current golden cluster and creating a new golden record identifier for the detached party, recording a detachment timeline event and a new golden creation timeline event.
+**Claim 2.** A computer-implemented method for cluster drift detection comprising:
+- upon update of a party record, scoring the updated record against all sibling records in its current cluster;
+- when the best intra-cluster score falls below a threshold, determining drift and executing a full cross-cluster candidate search;
+- automatically reassigning, escalating, or detaching the record based on the external search results; and
+- recording all membership changes as immutable timeline events indexed by golden record identifier.
 
-**Claim 3.** A system for self-calibrating probabilistic record linkage parameter estimation in a master data management platform comprising:
-- at least one processor executing an Expectation-Maximization algorithm that estimates, without labeled training data, m-probabilities representing the probability of attribute agreement given a true match and u-probabilities representing the probability of attribute agreement given a true non-match, for each of a plurality of entity attributes;
-- a parameter store maintaining estimated m-probability and u-probability vectors per party type with a timestamp indicating estimation time;
-- a sanity guard module that validates estimated parameters against domain constraints, reverting to prior values when estimated parameters fail validation;
-- a scheduler configured to trigger automatic re-estimation on a recurring schedule; and
-- a probabilistic scoring engine that incorporates the estimated parameters into Fellegi-Sunter log-likelihood ratio computations.
+**Claim 3.** A system for autonomous Fellegi-Sunter parameter estimation comprising:
+- an Expectation-Maximization algorithm that estimates m-probabilities and u-probabilities from unlabeled record pairs;
+- a scheduled trigger for recurring re-estimation;
+- a sanity validation guard that reverts to prior values on aberrant results; and
+- a per-party-type parameter store with estimation timestamps.
 
-**Claim 4.** A computer-implemented method for human-in-the-loop machine learning model maintenance in an entity resolution system comprising:
-- at a time of a human expert decision regarding a candidate record pair, capturing a feature vector representing current attribute comparison values between the two records;
-- persisting the captured feature vector with the human expert's match or no-match label as an immutable feedback record;
-- upon accumulation of a threshold count of feedback records, automatically retraining a logistic regression model using the stored feature vectors and labels;
-- computing trained model performance metrics including accuracy, precision, recall, and F1 score; and
-- replacing the active scoring model with the retrained model if performance metrics meet minimum acceptance criteria.
+**Claim 4.** A method for human-in-the-loop ML retraining comprising:
+- capturing feature vectors at the time of human review decisions, not at training time;
+- persisting feature vectors with human labels as immutable records;
+- automatically triggering logistic regression retraining upon accumulation of new labeled examples; and
+- computing and storing model performance metrics including precision, recall, and per-feature importance.
 
-**Claim 5.** A computer-implemented method for provisional identity assignment in a master data management system comprising:
-- receiving an entity record requiring human expert review before permanent golden cluster assignment;
-- prior to any human expert review, generating a provisional globally unique identifier for the entity record;
-- creating a complete golden record associated with the provisional identifier, comprising survivorship-rule-applied attribute values derived from the single entity record;
-- indexing the entity record in a blocking index using the provisional golden identifier;
-- making the entity record available to downstream applications via the provisional golden identifier during the entire review period;
-- upon human expert approval of a merge with a candidate cluster, migrating the entity record to the candidate cluster's golden identifier and retiring the provisional identifier; and
-- upon human expert rejection of all proposed merges, promoting the provisional golden identifier to a permanent golden identifier without any additional operations.
+**Claim 5.** A method for provisional golden identity assignment comprising:
+- assigning a globally unique golden identifier to every ingested record before any database transaction commits;
+- creating a complete golden record for provisional records;
+- making provisional records fully available to downstream systems during review; and
+- upon merge approval, migrating to the surviving cluster identifier; upon merge rejection, converting the provisional identifier to permanent without additional operations.
 
-### DEPENDENT CLAIMS
+**Claim 6.** The method of Claim 1, wherein scoring includes a third AI-enhanced stage using a Large Language Model invoked conditionally only for scores in an ambiguous range, with the final score as a weighted blend of probabilistic and LLM scores.
 
-**Claim 6.** The method of Claim 1, wherein the probabilistic scoring further comprises a third AI-enhancement stage that is conditionally invoked when the probabilistic score falls within a predetermined ambiguous range, the AI-enhancement stage comprising: constructing a structured prompt containing attribute data from both party records; submitting the prompt to a large language model; parsing a numeric score from the model response; and computing a final blended score as a weighted combination of the probabilistic score and the AI score.
+**Claim 7.** The method of Claim 1, wherein nickname variant encoding uses a stored table of equivalence groups covering 90+ given name families, generating phonetic blocking keys for each equivalent form.
 
-**Claim 7.** The method of Claim 1, wherein generating blocking keys using nickname variant phonetic encoding comprises: looking up a given name in a pre-stored table of equivalence groups, each group comprising a canonical name and all culturally and historically equivalent variant names; and generating a phonetic blocking key for each variant name in the matching equivalence group.
+**Claim 8.** The method of Claim 1, wherein the blocking index is maintained as dual concurrent hash maps — an inverted index mapping keys to record sets and a forward index mapping records to key sets — enabling O(1) complete removal of a record from the blocking index.
 
-**Claim 8.** The method of Claim 1, wherein the inverted index is maintained in a first concurrent hash map mapping blocking key strings to sets of global identifiers, and a forward index is maintained in a second concurrent hash map mapping global identifiers to sets of blocking key strings, enabling O(1) removal of all blocking index entries for a party record upon deletion or merge.
+**Claim 9.** The method of Claim 2, wherein timeline events are persisted as structured documents to a distributed document store partitioned by golden record identifier, containing event type, prior state, new state, timestamp, actor, and event-specific metadata.
 
-**Claim 9.** The method of Claim 2, wherein the timeline events comprise structured documents persisted to a distributed document database partitioned by golden record identifier, each document comprising: an event type identifier; a previous state representation; a new state representation; a timestamp; an actor identifier; and a map of event-specific metadata.
+**Claim 10.** The system of Claim 3, wherein the E-step uses log-space arithmetic with a maximum-log offset to prevent floating-point underflow during posterior probability computation.
 
-**Claim 10.** The method of Claim 3, wherein the Expectation-Maximization algorithm comprises: drawing a random sample of party record pairs from a graph database; computing a binary agreement vector for each pair across ten attributes; in an E-step, computing posterior match probabilities using numerically stable log-space computation with a maximum-log offset to prevent floating-point underflow; and in an M-step, updating m and u estimates as posterior-weighted averages of agreement indicators.
+**Claim 11.** The system of Claim 3, further comprising a query-time survivorship rule engine that assembles golden records at retrieval time by applying configurable per-attribute rules from: source priority ordering, most-recent timestamp, majority vote, supremacy source, first non-null, or longest string; enabling rule changes to take effect immediately without data layer recomputation.
 
-**Claim 11.** The system of Claim 3, further comprising: a query-time survivorship rule engine that assembles a golden record from underlying source records at retrieval time by applying one of: source priority ordering; most-recent timestamp selection; majority vote across sources; supremacy source designation; first non-null value selection; or longest string selection per attribute; wherein the assembled golden record is not pre-computed but is generated fresh on each retrieval, enabling rule configuration changes to take effect immediately.
+**Claim 12.** The method of Claim 4, wherein feature vectors captured at decision time preserve the statistical basis for the human label independent of subsequent mutations to the underlying records, enabling replay-free retraining.
 
-**Claim 12.** The method of Claim 4, wherein the feature vector captures attribute comparison values at the time of human expert decision rather than at training time, preserving the statistical basis for the decision independent of subsequent record mutations.
+**Claim 13.** The method of Claim 5, wherein the provisional golden identifier is a system-generated zero-padded numeric string, and wherein a client-supplied identifier in any format may override the auto-generated identifier during migration from legacy systems.
 
-**Claim 13.** The method of Claim 5, wherein the provisional golden identifier is assigned using a random number generator producing a zero-padded fixed-length numeric string, and wherein a client-supplied identifier in any format may optionally override the auto-generated identifier during migration from legacy systems.
+**Claim 14.** A method for transitive entity cluster formation using Union-Find with path compression and union-by-rank, wherein any two records transitively connected through a chain of pairwise matches are assigned to the same cluster regardless of whether they were directly compared.
 
-**Claim 14.** A computer-implemented method for transitive entity cluster formation comprising: computing pairwise match scores between entity records to produce a set of pairs above a link threshold; applying a Union-Find algorithm with path compression and union-by-rank to identify transitive closure clusters; wherein any two records that are transitively connected through any chain of pairwise matches are assigned to the same golden cluster regardless of whether they have been directly compared.
-
-**Claim 15.** The method of Claim 1, wherein the probabilistic scoring applies twenty or more similarity algorithms to entity attributes, the algorithms comprising at least: Jaro-Winkler similarity; token sort ratio; token set ratio; bigram Jaccard similarity; trigram Jaccard similarity; Damerau-Levenshtein optimal string alignment distance; Double Metaphone phonetic encoding; TF-IDF cosine similarity over character n-gram vectors; and nickname equivalence lookup; wherein multiple algorithm outputs are combined per attribute using Fellegi-Sunter log-likelihood weighting.
+**Claim 15.** The method of Claim 1, wherein probabilistic scoring applies twenty or more similarity algorithms including Jaro-Winkler, token sort ratio, token set ratio, bigram Jaccard, trigram Jaccard, Damerau-Levenshtein, Double Metaphone, TF-IDF character n-gram cosine similarity, and nickname equivalence lookup, with outputs combined using Fellegi-Sunter log-likelihood weighting.
 
 ---
 
 ## ABSTRACT
 
-An enterprise Master Data Management (MDM) platform implements adaptive entity resolution through five novel technical innovations. First, a nine-strategy union blocking engine generates blocking keys using phonetic encoding, nickname expansion, date-of-birth hashing, identifier prefixes, geographic encoding, and exact identifier matching applied in union, reducing pairwise comparison complexity from O(N²) to O(N×k). Second, a self-calibrating Expectation-Maximization algorithm autonomously estimates Fellegi-Sunter m and u probability parameters from unlabeled data on a recurring schedule, eliminating manual calibration. Third, a three-stage cascading match pipeline combines deterministic, probabilistic, and AI-enhanced (Large Language Model) matching with threshold-driven routing to auto-link, steward review, or new entity creation. Fourth, a provisional golden identity management system assigns a globally unique identifier to every party record before any database commit — including records pending steward review — eliminating the null golden state condition present in all prior-art MDM systems and guaranteeing continuous downstream data availability. Fifth, a post-update cluster drift detector re-evaluates party cluster membership after every attribute update, automatically reassigning, escalating to steward review, or detaching to a new cluster when statistical drift is confirmed. All cluster membership changes are recorded as immutable timeline events enabling full audit trail reconstruction and compliance reporting.
-
----
-
-## SEQUENCE LISTING / COMPUTER PROGRAM LISTINGS
-
-Computer program listings for the key algorithmic innovations are appended as Exhibits A through G:
-
-- **Exhibit A:** `BlockingKeyService.java` — Nine-strategy blocking key generation
-- **Exhibit B:** `EMAlgorithmService.java` — Expectation-Maximization parameter estimation
-- **Exhibit C:** `MatchingEngine.java` — Three-stage cascading match pipeline
-- **Exhibit D:** `ProbabilisticMatcher.java` — Fellegi-Sunter probabilistic scorer
-- **Exhibit E:** `PartyService.java` — Ingest pipeline and drift detection
-- **Exhibit F:** `GoldenRecordService.java` — Query-time survivorship assembly
-- **Exhibit G:** `MLMatchingService.java` — Human-in-the-loop logistic regression
+Averio MDM is an enterprise Master Data Management platform built around five technical innovations for entity resolution at scale. A nine-strategy union blocking engine brings more true match candidates into scope than single-strategy approaches by applying phonetic, demographic, identifier, geographic, and contact strategies simultaneously and taking their union. A nightly Expectation-Maximization algorithm re-calibrates the Fellegi-Sunter match model parameters from unlabeled data, keeping accuracy stable as data characteristics evolve over time. A three-stage cascading pipeline routes records through deterministic, probabilistic, and AI-enhanced matching in sequence, using Large Language Model disambiguation only for the statistically ambiguous subset. A provisional golden identity system assigns every record a permanent identifier before its first database commit, so no record is ever in a null identity state regardless of where it sits in the review process. A post-update drift detection algorithm re-evaluates cluster membership on every attribute update and automatically corrects incorrect merges as data quality improves, recording all membership changes as an immutable timeline for compliance audit.
 
 ---
 
 ## INVENTOR DECLARATION
 
-I hereby declare that:
+I, Suvojeet Pal, declare that I am the sole inventor of the subject matter described and claimed in this provisional patent application. I have conceived and developed the Averio MDM system described herein as an individual. The system reflects my own original technical design based on direct experience with the limitations of existing enterprise Master Data Management products.
 
-(a) Each undersigned inventor believes the named inventors are the original and first inventors of the subject matter which is claimed and for which a patent is sought on the invention titled:
+I acknowledge the duty to disclose information material to patentability as defined in 37 C.F.R. § 1.56.
 
-**"ADAPTIVE MULTI-STRATEGY ENTITY RESOLUTION SYSTEM WITH PROBABILISTIC CLUSTER DRIFT DETECTION, PROVISIONAL GOLDEN IDENTITY MANAGEMENT, AND SELF-CALIBRATING FELLEGI-SUNTER PARAMETER ESTIMATION FOR ENTERPRISE MASTER DATA MANAGEMENT"**
-
-(b) The undersigned inventors acknowledge the duty to disclose information that is material to patentability as defined in 37 C.F.R. § 1.56.
-
-**Inventor 1:**  
+**Inventor:**  
 Name: Suvojeet Pal  
 Residence: [Address]  
 Citizenship: [Citizenship]  
 Signature: ____________________  Date: ____________
 
-**Inventor 2:**  
-Name: Rakhi Chatterjee  
-Residence: [Address]  
-Citizenship: [Citizenship]  
-Signature: ____________________  Date: ____________
-
 ---
 
-## INFORMATION DISCLOSURE STATEMENT (IDS) — PRIOR ART
-
-The following prior art is disclosed for examiner consideration:
+## PRIOR ART CONSIDERED
 
 ### U.S. Patents
-- US 7,853,573 B2 — "System and method for data integration" (IBM InfoSphere)
-- US 8,285,719 B2 — "Entity resolution in master data management"
-- US 9,330,169 B2 — "Probabilistic record linkage with feedback learning"
-- US 10,437,882 B2 — "Dynamic survivorship rules for master data"
+- US 7,853,573 B2 — Data integration system (IBM InfoSphere)
+- US 8,285,719 B2 — Entity resolution in master data management
+- US 9,330,169 B2 — Probabilistic record linkage with feedback learning
+- US 10,437,882 B2 — Dynamic survivorship rules for master data
 
-### Non-Patent Literature
-1. Fellegi, I.P. and Sunter, A.B. (1969). "A theory for record linkage." *Journal of the American Statistical Association*, 64(328), 1183-1210.
-2. Winkler, W.E. (1988). "Using the EM algorithm for weight computation in the Fellegi-Sunter model of record linkage." *Proceedings of the Section on Survey Research Methods*, ASA, 667-671.
-3. Larsen, M.D. and Rubin, D.B. (2001). "Iterative automated record linkage using mixture models." *Journal of the American Statistical Association*, 96(453), 32-41.
-4. Damerau, F.J. (1964). "A technique for computer detection and correction of spelling errors." *Communications of the ACM*, 7(3), 171-176.
-5. Christen, P. (2012). *Data Matching: Concepts and Techniques for Record Linkage, Entity Resolution, and Duplicate Detection*. Springer.
-6. Köpcke, H. and Rahm, E. (2010). "Frameworks for entity matching: A comparison." *Data & Knowledge Engineering*, 69(2), 197-210.
+### Published Literature
+1. Fellegi, I.P. and Sunter, A.B. (1969). A theory for record linkage. *Journal of the American Statistical Association*, 64(328), 1183-1210.
+2. Winkler, W.E. (1988). Using the EM algorithm for weight computation in the Fellegi-Sunter model. *Proceedings ASA Survey Research Methods*, 667-671.
+3. Larsen, M.D. and Rubin, D.B. (2001). Iterative automated record linkage using mixture models. *JASA*, 96(453), 32-41.
+4. Damerau, F.J. (1964). A technique for computer detection and correction of spelling errors. *CACM*, 7(3), 171-176.
+5. Christen, P. (2012). *Data Matching*. Springer.
+6. Köpcke, H. and Rahm, E. (2010). Frameworks for entity matching. *Data & Knowledge Engineering*, 69(2), 197-210.
 
-### Distinguishing Features Over Prior Art
+### How This Invention Differs
 
-The present invention is distinguished from all cited prior art in at least the following respects:
+**Over US 9,330,169:** That system requires labeled training pairs. This invention learns parameters unsupervised via EM on a schedule.
 
-1. **Over static probabilistic systems (US 9,330,169):** The present invention's EM algorithm automatically re-estimates Fellegi-Sunter parameters on a schedule without human-labeled training pairs. The cited reference requires labeled training sets and does not provide automatic scheduled re-estimation.
+**Over all blocking prior art:** No prior reference discloses nine independent strategies in union with a dual inverted/forward concurrent hash map index. Prior systems use two to four strategies at most.
 
-2. **Over blocking-based systems:** No prior art reference discloses nine independent blocking strategies applied in union with a dual (inverted + forward) concurrent hash map structure. The cited references apply two to four strategies at most.
+**Over US 10,437,882:** That system pre-computes and stores golden records. This invention assembles them at query time, enabling instant rule changes and view-scoped golden records.
 
-3. **Over survivorship rule systems (US 10,437,882):** The cited reference pre-computes and stores golden record attribute values. The present invention assembles golden records at query time from source records, enabling instant rule changes without data re-computation and supporting multiple view-scoped golden records from the same underlying data.
+**Over all commercial MDM systems:** No prior art discloses the Provisional Golden Identity pattern. All known commercial MDM platforms (IBM InfoSphere MDM, Informatica MDM, SAP Master Data Governance, TIBCO EBX, Reltio Cloud) allow records in steward review to exist without a golden identifier.
 
-4. **Over all prior MDM systems:** No prior art discloses the Provisional Golden Identity pattern that eliminates the null golden state. All known commercial MDM systems (IBM InfoSphere MDM, Informatica MDM, SAP Master Data Governance, TIBCO EBX, Reltio Cloud) allow party records pending steward review to exist without a golden identifier.
+**Over all commercial MDM systems:** No prior art discloses post-update probabilistic cluster drift detection. Existing systems leave incorrect merges in place indefinitely after the attributes that caused the merge are corrected.
 
-5. **Over all prior MDM systems:** No prior art discloses post-update probabilistic cluster drift detection. The concept of automatically re-evaluating cluster membership when party attributes change is wholly novel to the field of entity resolution.
-
-6. **Over AI-based matching systems:** No prior art discloses conditional three-stage cascading that falls back to LLM-based disambiguation only for the statistically ambiguous score range [0.5, 0.9], preserving deterministic and probabilistic accuracy while using AI only as a targeted tiebreaker.
+**Over LLM-based matching proposals:** No prior art discloses conditional three-stage cascading that uses LLM disambiguation only for the ambiguous score range, preserving deterministic and probabilistic performance for the majority of cases while using AI as a targeted fallback.
 
 ---
 
-*End of Patent Application*
-
----
-
-> **ATTORNEY NOTE:** This document has been prepared for filing under 35 U.S.C. § 111(a) as a non-provisional utility patent application. Filing fees apply per 37 C.F.R. § 1.16. An Information Disclosure Statement (IDS) should be filed concurrently with this application per 37 C.F.R. § 1.97. The inventors should execute the Inventor Declaration (AIA Form PTO/AIA/01) and an Assignment document (PTO/AIA/75) prior to filing. Drawings referenced in the Brief Description of Drawings section should be prepared as black-ink line drawings conforming to 37 C.F.R. § 1.84 and filed as separate exhibits. Consider filing a concurrent Patent Cooperation Treaty (PCT) application under the Patent Cooperation Treaty for international protection in jurisdictions where Averio MDM will be commercialized.
+*End of Provisional Patent Application — Docket AVERIO-001-US-PROV*

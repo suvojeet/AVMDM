@@ -59,6 +59,12 @@ public class TestRunnerService {
     @Autowired(required = false)
     private SurvivorshipRulesTestSuite survivorshipRulesTestSuite;
 
+    @Autowired(required = false)
+    private RelationshipTestSuite relationshipTestSuite;
+
+    @Autowired(required = false)
+    private SettingsTestSuite settingsTestSuite;
+
     // For cleanup of regression data
     @Autowired(required = false)
     private PartyRepository partyRepository;
@@ -370,6 +376,8 @@ public class TestRunnerService {
         if (timelineTestSuite           != null) suites.add(timelineTestSuite);
         if (mlTrainingTestSuite         != null) suites.add(mlTrainingTestSuite);
         if (stewardOperationsTestSuite  != null) suites.add(stewardOperationsTestSuite);
+        if (relationshipTestSuite       != null) suites.add(relationshipTestSuite);
+        if (settingsTestSuite           != null) suites.add(settingsTestSuite);
         if (regressionScenarioSuite     != null) suites.add(regressionScenarioSuite);
         return suites;
     }
@@ -384,7 +392,7 @@ public class TestRunnerService {
     private List<String> allSuiteNames() {
         return List.of("ALL", "API_HEALTH", "MATCHING", "BLOCKING",
                 "SURVIVORSHIP", "SURVIVORSHIP_RULES", "GOLDEN_RECORD", "TIMELINE",
-                "ML_TRAINING", "STEWARD_OPS", "REGRESSION");
+                "ML_TRAINING", "STEWARD_OPS", "RELATIONSHIP", "SETTINGS", "REGRESSION");
     }
 
     private Map<String, Object> buildEnvironment() {

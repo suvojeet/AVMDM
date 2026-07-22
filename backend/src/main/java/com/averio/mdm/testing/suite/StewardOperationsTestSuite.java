@@ -1,7 +1,9 @@
 package com.averio.mdm.testing.suite;
 
 import com.averio.mdm.domain.cosmos.PartyDoc;
+import com.averio.mdm.domain.timeline.TimelineEvent;
 import com.averio.mdm.repository.cosmos.PartyDocRepository;
+import com.averio.mdm.repository.cosmos.TimelineRepository;
 import com.averio.mdm.testing.domain.TestResult;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -9,7 +11,10 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -26,6 +31,9 @@ public class StewardOperationsTestSuite extends AbstractTestSuite {
 
     @Autowired(required = false)
     private PartyDocRepository partyDocRepository;
+
+    @Autowired(required = false)
+    private TimelineRepository timelineRepository;
 
     @Override
     public String getSuiteName() { return "STEWARD_OPS"; }
@@ -103,50 +111,92 @@ public class StewardOperationsTestSuite extends AbstractTestSuite {
         }
     }
 
-    // ── Test 2: Split — each record gets a unique new golden ID ──────────────
+    // ── Test 2: Split — records restored to their previous golden ID via timeline ─
 
     private TestResult testSplitAssignsNewGoldenIds(String testRunId, List<String> cleanupIds) {
-        String name = "testSplitAssignsNewGoldenIds";
+        String name = "testSplitRestoresToPreviousGoldenId";
         long start = System.currentTimeMillis();
         if (partyDocRepository == null)
-            return skipped(name, "Split: each source record gets its own brand-new golden ID", "PartyDocRepository unavailable");
+            return skipped(name, "Split: each record is restored to its previous golden ID recorded in the timeline", "PartyDocRepository unavailable");
+        if (timelineRepository == null)
+            return skipped(name, "Split: timeline lookup required to find previous golden IDs", "TimelineRepository unavailable");
         try {
-            String sharedGolden = newGoldenId();
+            // Set up: two parties originally had separate golden IDs, then got merged into sharedGolden
+            String originalGolden1 = newGoldenId(); // Trust's original golden
+            String originalGolden2 = newGoldenId(); // Brokerage's original golden
+            String sharedGolden    = newGoldenId(); // merged cluster golden
+
             PartyDoc d1 = makeDoc(testRunId, "SplitA", "Trust",    sharedGolden);
             PartyDoc d2 = makeDoc(testRunId, "SplitB", "Brokerage",sharedGolden);
-            PartyDoc d3 = makeDoc(testRunId, "SplitC", "ERP",      sharedGolden);
             partyDocRepository.save(d1);
             partyDocRepository.save(d2);
-            partyDocRepository.save(d3);
             cleanupIds.add(d1.getGlobalId());
             cleanupIds.add(d2.getGlobalId());
-            cleanupIds.add(d3.getGlobalId());
 
-            // Simulate split: each gets a unique new golden ID
-            List<String> newIds = new ArrayList<>();
-            for (PartyDoc d : List.of(d1, d2, d3)) {
-                String ng = newGoldenId();
-                d.setGoldenRecordId(ng);
-                d.setUpdatedAt(LocalDateTime.now());
-                partyDocRepository.save(d);
-                newIds.add(ng);
+            // Seed PARTY_JOINED_CLUSTER timeline events on sharedGolden recording where each came from
+            TimelineEvent ev1 = makeJoinEvent(sharedGolden, d1.getGlobalId(), originalGolden1, testRunId);
+            TimelineEvent ev2 = makeJoinEvent(sharedGolden, d2.getGlobalId(), originalGolden2, testRunId);
+            timelineRepository.save(ev1);
+            timelineRepository.save(ev2);
+            cleanupIds.add(ev1.getEventId()); // event IDs also need cleanup (reuse cleanupIds for tracking)
+
+            // Simulate split using the timeline: restore each doc to its previous golden ID
+            List<TimelineEvent> events = timelineRepository
+                    .findByEntityIdAndEventTypeIn(sharedGolden, List.of("PARTY_JOINED_CLUSTER"));
+
+            Map<String, String> prevGoldenByGlobalId = new LinkedHashMap<>();
+            for (TimelineEvent ev : events) {
+                Map<String, Object> vals = ev.getNewValues();
+                if (vals == null) continue;
+                String gid  = vals.get("partyGlobalId") != null ? vals.get("partyGlobalId").toString() : null;
+                String from = vals.get("fromGoldenId")  != null ? vals.get("fromGoldenId").toString()  : null;
+                if (gid != null && from != null) prevGoldenByGlobalId.put(gid, from);
             }
 
-            // Verify: all 3 new golden IDs are distinct and none equals sharedGolden
-            long distinctCount = newIds.stream().distinct().count();
-            boolean noneMatchesOriginal = newIds.stream().noneMatch(sharedGolden::equals);
+            // Apply restore
+            List<PartyDoc> cluster = new ArrayList<>();
+            partyDocRepository.findAll().forEach(all -> {
+                if (sharedGolden.equals(all.getGoldenRecordId())
+                        && all.getGlobalId().startsWith("P-SOPS-" + testRunId))
+                    cluster.add(all);
+            });
 
-            if (distinctCount == 3 && noneMatchesOriginal) {
-                return pass(name, "Split: 3 records now have 3 distinct new golden IDs, none matching the original", elapsed(start),
-                        input("originalGoldenId", sharedGolden, "recordCount", 3),
-                        output("distinctNewGoldenIds", distinctCount, "noneMatchOriginal", noneMatchesOriginal));
+            for (PartyDoc d : cluster) {
+                String prev = prevGoldenByGlobalId.get(d.getGlobalId());
+                if (prev != null) {
+                    d.setGoldenRecordId(prev);
+                    d.setUpdatedAt(LocalDateTime.now());
+                    partyDocRepository.save(d);
+                }
+            }
+
+            // Verify: d1 back to originalGolden1, d2 back to originalGolden2, sharedGolden empty
+            List<PartyDoc> all = new ArrayList<>();
+            partyDocRepository.findAll().forEach(all::add);
+            boolean d1Restored = all.stream().filter(d -> d1.getGlobalId().equals(d.getGlobalId()))
+                    .anyMatch(d -> originalGolden1.equals(d.getGoldenRecordId()));
+            boolean d2Restored = all.stream().filter(d -> d2.getGlobalId().equals(d.getGlobalId()))
+                    .anyMatch(d -> originalGolden2.equals(d.getGoldenRecordId()));
+            long stillShared   = all.stream()
+                    .filter(d -> sharedGolden.equals(d.getGoldenRecordId())
+                              && d.getGlobalId().startsWith("P-SOPS-" + testRunId))
+                    .count();
+
+            // Cleanup seeded timeline events
+            try { timelineRepository.deleteById(ev1.getEventId()); } catch (Exception ignored) {}
+            try { timelineRepository.deleteById(ev2.getEventId()); } catch (Exception ignored) {}
+
+            if (d1Restored && d2Restored && stillShared == 0) {
+                return pass(name, "Split via timeline: Trust restored to " + originalGolden1 + ", Brokerage to " + originalGolden2 + ", shared cluster empty", elapsed(start),
+                        input("sharedGolden", sharedGolden, "trustOriginal", originalGolden1, "brokerageOriginal", originalGolden2),
+                        output("d1Restored", d1Restored, "d2Restored", d2Restored, "stillShared", stillShared));
             } else {
-                return fail(name, "Expected 3 distinct new golden IDs, none matching original", elapsed(start),
-                        "distinctCount=" + distinctCount + " noneMatchesOriginal=" + noneMatchesOriginal,
-                        input("originalGoldenId", sharedGolden));
+                return fail(name, "Expected both records restored to original golden IDs and shared cluster empty", elapsed(start),
+                        "d1Restored=" + d1Restored + " d2Restored=" + d2Restored + " stillShared=" + stillShared,
+                        input("sharedGolden", sharedGolden, "eventsFound", prevGoldenByGlobalId.size()));
             }
         } catch (Exception e) {
-            return error(name, "Split golden ID test threw exception", elapsed(start), e);
+            return error(name, "Split-via-timeline test threw exception", elapsed(start), e);
         }
     }
 
@@ -249,47 +299,52 @@ public class StewardOperationsTestSuite extends AbstractTestSuite {
         }
     }
 
-    // ── Test 5: Split on a single-record cluster — idempotent ────────────────
+    // ── Test 5: Split with no timeline history returns NEVER_MERGED ─────────
 
     private TestResult testSplitIsIdempotentSingleRecord(String testRunId, List<String> cleanupIds) {
-        String name = "testSplitIsIdempotentSingleRecord";
+        String name = "testSplitBlockedWhenNeverMerged";
         long start = System.currentTimeMillis();
-        if (partyDocRepository == null)
-            return skipped(name, "Split on single-record cluster produces one new golden ID", "PartyDocRepository unavailable");
+        if (partyDocRepository == null || timelineRepository == null)
+            return skipped(name, "Split must be blocked when cluster has no merge history — NEVER_MERGED guard", "PartyDocRepository or TimelineRepository unavailable");
         try {
-            String singleGolden = newGoldenId();
-            PartyDoc solo = makeDoc(testRunId, "SplitSolo", "Trust", singleGolden);
-            partyDocRepository.save(solo);
-            cleanupIds.add(solo.getGlobalId());
+            // Cluster with two parties that always shared the same golden ID (never merged from elsewhere)
+            String nativeGolden = newGoldenId();
+            PartyDoc d1 = makeDoc(testRunId, "NativeA", "Trust",    nativeGolden);
+            PartyDoc d2 = makeDoc(testRunId, "NativeB", "Brokerage",nativeGolden);
+            partyDocRepository.save(d1);
+            partyDocRepository.save(d2);
+            cleanupIds.add(d1.getGlobalId());
+            cleanupIds.add(d2.getGlobalId());
 
-            // Simulate split: assign a new golden ID
-            String newGolden = newGoldenId();
-            solo.setGoldenRecordId(newGolden);
-            solo.setUpdatedAt(LocalDateTime.now());
-            partyDocRepository.save(solo);
+            // No PARTY_JOINED_CLUSTER timeline events are seeded — simulate a cluster that was never collapsed
 
-            // Verify: new golden is different from old, record is findable
-            List<PartyDoc> all = new ArrayList<>();
-            partyDocRepository.findAll().forEach(all::add);
-            boolean hasNewGolden = all.stream()
-                    .filter(d -> solo.getGlobalId().equals(d.getGlobalId()))
-                    .anyMatch(d -> newGolden.equals(d.getGoldenRecordId()));
-            boolean oldGoldenEmpty = all.stream()
-                    .filter(d -> d.getGlobalId().startsWith("P-SOPS-" + testRunId))
-                    .noneMatch(d -> singleGolden.equals(d.getGoldenRecordId()));
-            boolean idsAreDifferent = !singleGolden.equals(newGolden);
+            // Check timeline: should find 0 PARTY_JOINED_CLUSTER events for nativeGolden involving these parties
+            List<TimelineEvent> events = timelineRepository
+                    .findByEntityIdAndEventTypeIn(nativeGolden, List.of("PARTY_JOINED_CLUSTER", "INGEST_AUTO_LINKED", "MERGE"));
 
-            if (hasNewGolden && oldGoldenEmpty && idsAreDifferent) {
-                return pass(name, "Single-record split produces a new distinct golden ID; old golden is vacated", elapsed(start),
-                        input("oldGolden", singleGolden, "newGolden", newGolden),
-                        output("hasNewGolden", hasNewGolden, "oldGoldenEmpty", oldGoldenEmpty));
+            // Filter to only events for our test run parties
+            long relevantEvents = events.stream()
+                    .filter(ev -> {
+                        Map<String, Object> vals = ev.getNewValues();
+                        if (vals == null) return false;
+                        Object gid = vals.get("partyGlobalId");
+                        return gid != null && (d1.getGlobalId().equals(gid.toString()) || d2.getGlobalId().equals(gid.toString()));
+                    }).count();
+
+            // The NEVER_MERGED guard: if 0 relevant join events → split should be blocked
+            boolean shouldBlock = relevantEvents == 0;
+
+            if (shouldBlock) {
+                return pass(name, "NEVER_MERGED guard correctly identifies cluster with no merge history: " + relevantEvents + " join events found — split should be blocked", elapsed(start),
+                        input("nativeGolden", nativeGolden, "clusterSize", 2),
+                        output("relevantJoinEvents", relevantEvents, "shouldBlock", true));
             } else {
-                return fail(name, "Single-record split should vacate old golden and assign new one", elapsed(start),
-                        "hasNewGolden=" + hasNewGolden + " oldGoldenEmpty=" + oldGoldenEmpty + " idsAreDifferent=" + idsAreDifferent,
-                        input("oldGolden", singleGolden, "newGolden", newGolden));
+                return fail(name, "Expected 0 merge-history events for a native cluster, but found: " + relevantEvents, elapsed(start),
+                        "relevantEvents=" + relevantEvents + " expected=0",
+                        input("nativeGolden", nativeGolden));
             }
         } catch (Exception e) {
-            return error(name, "Single-record split test threw exception", elapsed(start), e);
+            return error(name, "NEVER_MERGED guard test threw exception", elapsed(start), e);
         }
     }
 
@@ -369,6 +424,28 @@ public class StewardOperationsTestSuite extends AbstractTestSuite {
                 .updatedAt(LocalDateTime.now())
                 .createdBy("TEST_LAB")
                 .updatedBy("TEST_LAB")
+                .build();
+    }
+
+    /** Builds a PARTY_JOINED_CLUSTER timeline event as the split logic expects to find. */
+    private TimelineEvent makeJoinEvent(String goldenRecordId, String partyGlobalId,
+                                        String fromGoldenId, String testRunId) {
+        Map<String, Object> vals = new LinkedHashMap<>();
+        vals.put("partyGlobalId", partyGlobalId);
+        vals.put("fromGoldenId",  fromGoldenId);
+        vals.put("reason",        "TEST_LAB_MERGE_" + testRunId);
+        return TimelineEvent.builder()
+                .eventId("EV-SOPS-" + testRunId + "-" + UUID.randomUUID().toString().substring(0, 8))
+                .entityId(goldenRecordId)
+                .entityType("PARTY")
+                .eventType("PARTY_JOINED_CLUSTER")
+                .eventCategory("SYSTEM")
+                .changedBy("TEST_LAB")
+                .eventTimestamp(LocalDateTime.now())
+                .description("TEST_LAB: party " + partyGlobalId + " joined from " + fromGoldenId)
+                .newValues(vals)
+                .isRestorable(false)
+                .createdAt(LocalDateTime.now())
                 .build();
     }
 

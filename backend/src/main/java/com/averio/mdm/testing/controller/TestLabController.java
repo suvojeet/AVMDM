@@ -208,7 +208,7 @@ public class TestLabController {
                 "API_HEALTH", "MATCHING", "BLOCKING",
                 "SURVIVORSHIP", "SURVIVORSHIP_RULES",
                 "GOLDEN_RECORD", "TIMELINE", "ML_TRAINING",
-                "STEWARD_OPS", "REGRESSION");
+                "STEWARD_OPS", "RELATIONSHIP", "SETTINGS", "REGRESSION");
 
         // Collect the latest completed (non-RUNNING) run per suite
         List<TestRun> recentRuns = testRunnerService.getRecentRuns(200);
@@ -375,6 +375,8 @@ public class TestLabController {
                 Map.of("name", "TIMELINE",           "description", "Timeline event persistence, retrieval, ordering, and service integration"),
                 Map.of("name", "ML_TRAINING",        "description", "ML training pipeline: mode config, feature extraction, dedup, balancing, contradiction resolution"),
                 Map.of("name", "STEWARD_OPS",        "description", "Steward golden ID operations: merge, split, unlink, relink via Cosmos DB"),
+                Map.of("name", "RELATIONSHIP",       "description", "Relationship CRUD, cardinality, temporal logic, search correctness, graph traversal, duplicate guard, bulk ops"),
+                Map.of("name", "SETTINGS",           "description", "MDM Settings validation: threshold ordering, DQ weights, survivorship strategies, security bounds, GDPR rules, notification bounds"),
                 Map.of("name", "REGRESSION",         "description", "End-to-end ingest pipeline scenarios with full persistence and cleanup")
         );
         return ResponseEntity.ok(suites);

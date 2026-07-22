@@ -1,4 +1,4 @@
-import { useState } from "react";
+import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { enterpriseViewApi, partyApi } from "../../services/api";
@@ -7,7 +7,8 @@ import {
   Star, Plus, Shield, Settings2, DollarSign, Scale,
   ShieldAlert, Globe, Layers, X, CheckCircle, Trash2,
   ChevronRight, AlertCircle, Search, Database, Users,
-  BarChart2, Clock,
+  BarChart2, Clock, SlidersHorizontal, Link2, Fingerprint,
+  CalendarClock, Activity,
 } from "lucide-react";
 import clsx from "clsx";
 
@@ -163,38 +164,174 @@ function CreateViewForm({ onSave, onClose }: {
   );
 }
 
+// ── Attribute visibility toggle panel ────────────────────────────────────────
+
+function AttributeFilterPanel({
+  attrs, hidden, onToggle,
+}: {
+  attrs: string[];
+  hidden: Set<string>;
+  onToggle: (key: string) => void;
+}) {
+  return (
+    <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+      <div className="flex items-center gap-2 px-4 py-3 border-b border-aq-border">
+        <Settings2 size={14} className="text-aq-dim" />
+        <span className="text-xs font-semibold text-aq-text uppercase tracking-wide">Visible Attributes</span>
+        <span className="ml-auto text-[10px] text-aq-dim">{attrs.length - hidden.size} / {attrs.length}</span>
+      </div>
+      <div className="p-3 grid grid-cols-2 gap-1.5 max-h-64 overflow-y-auto">
+        {attrs.map((key) => {
+          const visible = !hidden.has(key);
+          return (
+            <button key={key} onClick={() => onToggle(key)}
+              className={clsx(
+                "flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-xs text-left transition-all border",
+                visible
+                  ? "bg-aq-blue/10 border-aq-blue/30 text-aq-blue-2"
+                  : "bg-aq-dark border-aq-border text-aq-dim hover:text-aq-text"
+              )}>
+              <span className={clsx("w-3 h-3 rounded flex-shrink-0 border flex items-center justify-center",
+                visible ? "bg-aq-blue/60 border-aq-blue" : "border-aq-border/60")}>
+                {visible && <CheckCircle size={8} className="text-white" />}
+              </span>
+              <span className="truncate font-mono">{key}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Golden Record Lookup tab ───────────────────────────────────────────────────
 
-function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
-  const [selectedViewId, setSelectedViewId] = useState("GLOBAL");
-  const [goldenId, setGoldenId] = useState("");
-  const [searchedId, setSearchedId] = useState<string | null>(null);
-  const [searchedViewId, setSearchedViewId] = useState<string>("GLOBAL");
+type SearchMode = "id" | "name";
 
-  const { data: golden, isLoading, isError, error } = useQuery({
+type LookupSession = {
+  selectedViewId: string;
+  searchMode: SearchMode;
+  goldenId: string;
+  nameQuery: string;
+  selectedParty: { globalId: string; goldenRecordId?: string; displayName: string; partyType: string } | null;
+  searchedId: string | null;
+  searchedViewId: string;
+  searchedName: string;
+};
+
+const SESSION_KEY = "averio_golden_lookup";
+
+function loadSession(): LookupSession {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY);
+    if (raw) return JSON.parse(raw) as LookupSession;
+  } catch { /* ignore */ }
+  return {
+    selectedViewId: "GLOBAL", searchMode: "id", goldenId: "",
+    nameQuery: "", selectedParty: null,
+    searchedId: null, searchedViewId: "GLOBAL", searchedName: "",
+  };
+}
+
+function saveSession(s: LookupSession) {
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
+
+function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
+  const initial = loadSession();
+
+  const [selectedViewId, setSelectedViewId] = useState(initial.selectedViewId);
+  const [searchMode, setSearchMode]         = useState<SearchMode>(initial.searchMode);
+  const [showAttrFilter, setShowAttrFilter] = useState(false);
+  const [hiddenAttrs, setHiddenAttrs]       = useState<Set<string>>(new Set());
+
+  // ID mode state
+  const [goldenId, setGoldenId]             = useState(initial.goldenId);
+
+  // Name mode state
+  const [nameQuery, setNameQuery]           = useState(initial.nameQuery);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [selectedParty, setSelectedParty]   = useState<{ globalId: string; goldenRecordId?: string; displayName: string; partyType: string } | null>(initial.selectedParty);
+  const nameRef = React.useRef<HTMLDivElement>(null);
+
+  // Committed search state (shared)
+  const [searchedId, setSearchedId]         = useState<string | null>(initial.searchedId);
+  const [searchedViewId, setSearchedViewId] = useState<string>(initial.searchedViewId);
+  const [searchedName, setSearchedName]     = useState<string>(initial.searchedName);
+
+  // Persist to sessionStorage whenever search state changes
+  React.useEffect(() => {
+    saveSession({ selectedViewId, searchMode, goldenId, nameQuery, selectedParty, searchedId, searchedViewId, searchedName });
+  }, [selectedViewId, searchMode, goldenId, nameQuery, selectedParty, searchedId, searchedViewId, searchedName]);
+
+  // Close suggestions on outside click
+  React.useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (nameRef.current && !nameRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  // Name suggestions query
+  const { data: suggestions = [], isFetching: suggestLoading } = useQuery({
+    queryKey: ["party-suggest", nameQuery],
+    queryFn:  () => partyApi.suggest(nameQuery, 8),
+    enabled:  searchMode === "name" && nameQuery.trim().length >= 2,
+    staleTime: 300,
+  });
+
+  const { data: golden, isLoading, isError } = useQuery({
     queryKey: ["golden-record-view", searchedId, searchedViewId],
-    queryFn: () => partyApi.getGoldenRecord(searchedId!, searchedViewId === "GLOBAL" ? undefined : searchedViewId),
-    enabled: !!searchedId,
+    queryFn:  () => partyApi.getGoldenRecord(searchedId!, searchedViewId === "GLOBAL" ? undefined : searchedViewId),
+    enabled:  !!searchedId,
     retry: false,
   });
 
   const { data: sources } = useQuery({
     queryKey: ["party-sources-view", searchedId],
-    queryFn: () => partyApi.getSources(searchedId!),
-    enabled: !!searchedId,
+    queryFn:  () => partyApi.getSources(searchedId!),
+    enabled:  !!searchedId,
     retry: false,
   });
 
   function handleSearch() {
-    if (!goldenId.trim()) return;
-    setSearchedId(goldenId.trim());
+    if (searchMode === "id") {
+      if (!goldenId.trim()) return;
+      setSearchedId(goldenId.trim());
+      setSearchedName("");
+    } else {
+      if (!selectedParty) return;
+      setSearchedId(selectedParty.goldenRecordId ?? selectedParty.globalId);
+      setSearchedName(selectedParty.displayName);
+    }
     setSearchedViewId(selectedViewId);
   }
 
-  const selectedView = views.find((v) => String(v.viewId) === selectedViewId);
-  const viewColor = selectedView ? String(selectedView.colorHex ?? "#6366f1") : "#6366f1";
+  function handleSwitchMode(mode: SearchMode) {
+    setSearchMode(mode);
+    setSearchedId(null);
+    setSearchedName("");
+    setGoldenId("");
+    setNameQuery("");
+    setSelectedParty(null);
+  }
 
-  const attrs = golden?.goldenAttributes ? Object.entries(golden.goldenAttributes as Record<string, Record<string, any>>) : [];
+  function handleSelectSuggestion(s: { globalId: string; goldenRecordId?: string; displayName: string; partyType: string }) {
+    setSelectedParty(s);
+    setNameQuery(s.displayName);
+    setShowSuggestions(false);
+  }
+
+  const selectedView = views.find((v) => String(v.viewId) === selectedViewId);
+  const viewColor    = selectedView ? String(selectedView.colorHex ?? "#6366f1") : "#6366f1";
+  const attrs        = golden?.goldenAttributes
+    ? Object.entries(golden.goldenAttributes as Record<string, Record<string, any>>)
+    : [];
+
+  const canSearch = searchMode === "id" ? !!goldenId.trim() : !!selectedParty;
 
   return (
     <div className="space-y-6">
@@ -206,7 +343,33 @@ function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
           </div>
           <div>
             <p className="text-sm font-semibold text-aq-text">Golden Record Explorer</p>
-            <p className="text-xs text-aq-dim">Select a view and enter a party golden ID to see the governed golden record</p>
+            <p className="text-xs text-aq-dim">Select a view and search by Party Golden ID or customer name to see the governed golden record</p>
+          </div>
+
+          {/* Search mode toggle */}
+          <div className="ml-auto flex items-center gap-1 p-1 bg-aq-dark border border-aq-border rounded-lg">
+            <button
+              onClick={() => handleSwitchMode("id")}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                searchMode === "id"
+                  ? "bg-aq-card text-aq-text border border-aq-border shadow-sm"
+                  : "text-aq-dim hover:text-aq-text"
+              )}
+            >
+              <Database size={12} /> Golden ID
+            </button>
+            <button
+              onClick={() => handleSwitchMode("name")}
+              className={clsx(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all",
+                searchMode === "name"
+                  ? "bg-aq-card text-aq-text border border-aq-border shadow-sm"
+                  : "text-aq-dim hover:text-aq-text"
+              )}
+            >
+              <Users size={12} /> By Name
+            </button>
           </div>
         </div>
 
@@ -233,39 +396,129 @@ function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
             </div>
           </div>
 
-          {/* Golden ID input */}
+          {/* Input — switches based on mode */}
           <div className="md:col-span-2 space-y-1.5">
-            <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">Party Golden ID</label>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={goldenId}
-                onChange={(e) => setGoldenId(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-                placeholder="Enter the party golden ID (UUID)…"
-                className="flex-1 bg-aq-dark border border-aq-border rounded-lg px-3 py-2.5 text-sm text-aq-text placeholder-aq-dim/50 focus:outline-none focus:border-aq-blue/60 transition-colors font-mono"
-              />
-              <button
-                onClick={handleSearch}
-                disabled={!goldenId.trim()}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30 hover:bg-aq-blue/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                <Search size={15} /> View Record
-              </button>
-            </div>
+            {searchMode === "id" ? (
+              <>
+                <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">Party Golden ID</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={goldenId}
+                    onChange={(e) => setGoldenId(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                    placeholder="Enter the party golden ID (UUID)…"
+                    className="flex-1 bg-aq-dark border border-aq-border rounded-lg px-3 py-2.5 text-sm text-aq-text placeholder-aq-dim/50 focus:outline-none focus:border-aq-blue/60 transition-colors font-mono"
+                  />
+                  <button
+                    onClick={handleSearch}
+                    disabled={!canSearch}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30 hover:bg-aq-blue/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Search size={15} /> View Record
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <label className="text-xs font-medium text-aq-dim uppercase tracking-wide">Customer Name</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1" ref={nameRef}>
+                    <div className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+                      <Search size={14} className="text-aq-dim" />
+                    </div>
+                    <input
+                      type="text"
+                      value={nameQuery}
+                      onChange={(e) => {
+                        setNameQuery(e.target.value);
+                        setSelectedParty(null);
+                        setShowSuggestions(true);
+                      }}
+                      onFocus={() => nameQuery.length >= 2 && setShowSuggestions(true)}
+                      onKeyDown={(e) => e.key === "Enter" && handleSearch()}
+                      placeholder="Type a customer or organization name…"
+                      className="w-full bg-aq-dark border border-aq-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-aq-text placeholder-aq-dim/50 focus:outline-none focus:border-aq-blue/60 transition-colors"
+                    />
+                    {/* Suggestions dropdown */}
+                    {showSuggestions && nameQuery.length >= 2 && (
+                      <div className="absolute top-full left-0 right-0 mt-1 z-30 bg-aq-card border border-aq-border rounded-xl shadow-2xl overflow-hidden">
+                        {suggestLoading ? (
+                          <div className="flex items-center gap-2 px-4 py-3 text-xs text-aq-dim">
+                            <div className="w-3 h-3 border border-aq-blue/40 border-t-aq-blue rounded-full animate-spin" />
+                            Searching…
+                          </div>
+                        ) : suggestions.length === 0 ? (
+                          <div className="px-4 py-3 text-xs text-aq-dim">No parties found for "{nameQuery}"</div>
+                        ) : (
+                          <ul>
+                            {suggestions.map((s) => (
+                              <li key={s.globalId}>
+                                <button
+                                  type="button"
+                                  onMouseDown={() => handleSelectSuggestion(s)}
+                                  className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-aq-border/20 transition-colors"
+                                >
+                                  <div className="w-7 h-7 rounded-lg bg-aq-dark border border-aq-border flex items-center justify-center flex-shrink-0">
+                                    <Users size={13} className="text-aq-dim" />
+                                  </div>
+                                  <div className="flex-1 min-w-0">
+                                    <p className="text-sm font-medium text-aq-text truncate">{s.displayName}</p>
+                                    <p className="text-[10px] font-mono truncate flex items-center gap-1">
+                                      <Star size={8} className="text-amber-400 fill-amber-400/40 flex-shrink-0" />
+                                      <span className="text-amber-300/80">{s.goldenRecordId ?? s.globalId}</span>
+                                    </p>
+                                  </div>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded border border-aq-border bg-aq-dark text-aq-dim flex-shrink-0">
+                                    {s.partyType}
+                                  </span>
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    onClick={handleSearch}
+                    disabled={!canSearch}
+                    className="flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-aq-blue/20 text-aq-blue-2 border border-aq-blue/30 hover:bg-aq-blue/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    <Search size={15} /> View Record
+                  </button>
+                </div>
+                {selectedParty && (
+                  <p className="text-xs flex items-center gap-1.5 pt-0.5">
+                    <CheckCircle size={11} className="text-teal-400 flex-shrink-0" />
+                    <Star size={9} className="text-amber-400 fill-amber-400/40 flex-shrink-0" />
+                    <span className="font-mono text-amber-300/80">{selectedParty.goldenRecordId ?? selectedParty.globalId}</span>
+                  </p>
+                )}
+              </>
+            )}
           </div>
         </div>
 
-        {/* Active view badge */}
+        {/* Active view + resolved party badge */}
         {searchedId && (
-          <div className="flex items-center gap-2 pt-1">
+          <div className="flex items-center gap-2 pt-1 flex-wrap">
             <span className="text-xs text-aq-dim">Viewing under:</span>
             <span className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border font-medium"
               style={{ color: viewColor, borderColor: `${viewColor}40`, backgroundColor: `${viewColor}12` }}>
               <ViewIcon name={String(selectedView?.iconName ?? "Globe")} color={viewColor} />
               {selectedView ? String(selectedView.viewName) : "Enterprise View (Global)"}
             </span>
-            <span className="text-xs text-aq-dim ml-1 font-mono">{searchedId}</span>
+            {searchedName ? (
+              <span className="text-xs text-aq-text font-medium">{searchedName}</span>
+            ) : null}
+            <span className="text-xs text-aq-dim">Golden ID:</span>
+            <span className="flex items-center gap-1 text-xs">
+              <Star size={10} className="text-amber-400 fill-amber-400/40 flex-shrink-0" />
+              <span className="font-mono text-amber-300/90">
+                {golden?.goldenRecordId ? String(golden.goldenRecordId) : searchedId}
+              </span>
+            </span>
           </div>
         )}
       </div>
@@ -282,150 +535,324 @@ function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
       {isError && (
         <div className="flex items-center gap-3 px-4 py-3 bg-red-500/10 border border-red-500/25 rounded-xl text-sm text-red-400">
           <AlertCircle size={16} className="flex-shrink-0" />
-          <span>No golden record found for <span className="font-mono">{searchedId}</span>. Check the party golden ID and try again.</span>
+          <span>No golden record found for <span className="font-mono">{searchedId}</span>. Check the ID and try again.</span>
         </div>
       )}
 
-      {/* Results */}
+      {/* ── Results ── */}
       {golden && !isLoading && (
         <div className="space-y-5 animate-fade-in">
 
-          {/* Quality scores */}
-          <div className="grid grid-cols-3 gap-4">
+          {/* ── KPI strip ── */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: "Confidence Score", value: golden.overallConfidenceScore, color: "text-blue-400", bar: "from-blue-500 to-blue-400" },
-              { label: "Completeness",     value: golden.completenessScore,      color: "text-emerald-400", bar: "from-emerald-500 to-teal-400" },
-              { label: "Data Quality",     value: golden.dataQualityScore,       color: "text-purple-400", bar: "from-purple-500 to-indigo-400" },
-            ].map(({ label, value, color, bar }) => (
-              <div key={label} className="bg-aq-card border border-aq-border rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <BarChart2 size={14} className={color} />
-                  <span className="text-xs text-aq-dim">{label}</span>
+              { label: "Confidence",   value: golden.overallConfidenceScore, icon: Activity,     color: "text-blue-400",    ring: "border-blue-500/30",    bg: "bg-blue-500/10"    },
+              { label: "Completeness", value: golden.completenessScore,      icon: BarChart2,    color: "text-emerald-400", ring: "border-emerald-500/30", bg: "bg-emerald-500/10" },
+              { label: "Data Quality", value: golden.dataQualityScore,       icon: CheckCircle,  color: "text-purple-400",  ring: "border-purple-500/30",  bg: "bg-purple-500/10"  },
+              { label: "Sources",      value: null,                          icon: Link2,        color: "text-amber-400",   ring: "border-amber-500/30",   bg: "bg-amber-500/10",
+                raw: String(sources?.length ?? golden.sourceCount ?? "—") },
+            ].map(({ label, value, icon: Icon, color, ring, bg, raw }) => (
+              <div key={label} className={clsx("rounded-xl border p-4 flex items-center gap-3", bg, ring)}>
+                <div className={clsx("w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 border", bg, ring)}>
+                  <Icon size={16} className={color} />
                 </div>
-                <p className={clsx("text-2xl font-bold", color)}>
-                  {value != null ? `${Math.round(Number(value) * 100)}%` : "—"}
-                </p>
-                <div className="mt-2 h-1.5 bg-aq-border rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full bg-gradient-to-r ${bar}`}
-                       style={{ width: value != null ? `${Number(value) * 100}%` : "0%" }} />
+                <div>
+                  <p className="text-[11px] text-aq-dim">{label}</p>
+                  <p className={clsx("text-xl font-bold leading-tight", color)}>
+                    {raw ?? (value != null ? `${Math.round(Number(value) * 100)}%` : "—")}
+                  </p>
                 </div>
+                {value != null && !raw && (
+                  <div className="ml-auto w-10 h-10 flex-shrink-0">
+                    <svg viewBox="0 0 36 36" className="rotate-[-90deg]">
+                      <circle cx="18" cy="18" r="15" fill="none" strokeWidth="3" className="stroke-aq-border" />
+                      <circle cx="18" cy="18" r="15" fill="none" strokeWidth="3"
+                        strokeDasharray={`${Number(value) * 94} 94`}
+                        strokeLinecap="round"
+                        style={{ stroke: color.replace("text-", "").includes("blue") ? "#60a5fa"
+                          : color.includes("emerald") ? "#34d399" : "#a78bfa" }} />
+                    </svg>
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
-          {/* Golden attributes */}
-          <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
-            <div className="flex items-center gap-3 px-5 py-4 border-b border-aq-border">
-              <Database size={16} className="text-blue-400" />
-              <h3 className="text-sm font-semibold text-aq-text">Survived Attribute Values</h3>
-              <span className="ml-auto text-xs px-2 py-0.5 rounded-full border border-aq-border text-aq-dim bg-aq-dark">
-                {attrs.length} attributes
-              </span>
-            </div>
-            <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-              {attrs.length === 0 ? (
-                <p className="col-span-2 text-center text-sm text-aq-dim py-6">No attributes available</p>
-              ) : attrs.map(([key, attr]: [string, Record<string, any>]) => (
-                <div key={key} className="bg-aq-dark rounded-lg p-3 border border-aq-border/60">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[10px] text-aq-dim font-semibold uppercase tracking-wider">{key}</p>
-                      <p className="text-sm font-semibold text-aq-text mt-1 truncate">
-                        {attr.value != null ? String(attr.value) : <span className="text-aq-dim italic">null</span>}
-                      </p>
-                      <p className="text-xs text-aq-dim mt-0.5">
-                        Source: <span className="text-aq-text">{String(attr.winningSourceSystem ?? "—")}</span>
-                      </p>
-                    </div>
-                    <span className={clsx("text-[10px] font-semibold px-1.5 py-0.5 rounded border flex-shrink-0", ruleColor(String(attr.survivorshipRule ?? "")))}>
-                      {String(attr.survivorshipRule ?? "—")}
+          {/* ── Main two-column layout ── */}
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+
+            {/* ── Left: Golden Attributes ── */}
+            <div className="xl:col-span-2 space-y-4">
+              <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+                <div className="flex items-center gap-3 px-5 py-3.5 border-b border-aq-border">
+                  <Star size={15} className="text-amber-400 fill-amber-400/30" />
+                  <h3 className="text-sm font-semibold text-aq-text">Golden Attributes</h3>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/10 text-amber-300 font-semibold">
+                    {attrs.filter(([k, a]) => !hiddenAttrs.has(k) && (a as Record<string,any>).value != null && String((a as Record<string,any>).value).trim() !== "").length} visible
+                  </span>
+                  <button
+                    onClick={() => setShowAttrFilter((v) => !v)}
+                    className={clsx(
+                      "ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all",
+                      showAttrFilter
+                        ? "bg-aq-blue/20 text-aq-blue-2 border-aq-blue/30"
+                        : "border-aq-border text-aq-dim hover:text-aq-text hover:bg-aq-border/30"
+                    )}>
+                    <SlidersHorizontal size={12} /> Columns
+                  </button>
+                </div>
+
+                {/* Attribute table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-aq-border bg-aq-dark/50">
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest w-36">Attribute</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Golden Value</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Winning Source</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Rule</th>
+                        <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest w-28">Confidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {attrs.length === 0 ? (
+                        <tr><td colSpan={5} className="text-center text-sm text-aq-dim py-10">No attributes available</td></tr>
+                      ) : attrs.filter(([k, a]) => !hiddenAttrs.has(k) && (a as Record<string, any>).value != null && String((a as Record<string, any>).value).trim() !== "").map(([key, attr]: [string, Record<string, any>]) => (
+                        <React.Fragment key={key}>
+                          <tr className="border-b border-aq-border/40 hover:bg-aq-border/10 transition-colors group">
+                            {/* Attribute name */}
+                            <td className="px-4 py-3">
+                              <span className="text-[11px] font-semibold font-mono text-aq-dim uppercase tracking-wide">{key}</span>
+                            </td>
+                            {/* Golden value */}
+                            <td className="px-4 py-3">
+                              <span className="text-sm font-semibold text-aq-text">
+                                {attr.value != null ? String(attr.value) : <span className="text-aq-dim/50 italic text-xs">null</span>}
+                              </span>
+                            </td>
+                            {/* Winning source */}
+                            <td className="px-4 py-3">
+                              <span className="inline-flex items-center gap-1.5 text-xs px-2 py-0.5 rounded-md border border-aq-border bg-aq-dark text-aq-text">
+                                <Database size={10} className="text-purple-400" />
+                                {String(attr.winningSourceSystem ?? "—")}
+                              </span>
+                            </td>
+                            {/* Survivorship rule */}
+                            <td className="px-4 py-3">
+                              <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded border", ruleColor(String(attr.survivorshipRule ?? "")))}>
+                                {String(attr.survivorshipRule ?? "—")}
+                              </span>
+                            </td>
+                            {/* Confidence bar */}
+                            <td className="px-4 py-3">
+                              {attr.confidenceScore != null ? (
+                                <div className="flex items-center gap-2">
+                                  <div className="flex-1 h-1.5 bg-aq-border rounded-full overflow-hidden">
+                                    <div className="h-full bg-gradient-to-r from-teal-500 to-emerald-400 rounded-full"
+                                         style={{ width: `${Number(attr.confidenceScore) * 100}%` }} />
+                                  </div>
+                                  <span className="text-[10px] text-aq-dim w-7 text-right">
+                                    {Math.round(Number(attr.confidenceScore) * 100)}%
+                                  </span>
+                                </div>
+                              ) : <span className="text-xs text-aq-dim">—</span>}
+                            </td>
+                          </tr>
+                          {/* Candidate values sub-row */}
+                          {attr.candidates && Array.isArray(attr.candidates) && attr.candidates.length > 1 && (
+                            <tr className="border-b border-aq-border/20 bg-aq-dark/30">
+                              <td className="px-4 py-2 pl-8" colSpan={5}>
+                                <div className="flex flex-wrap gap-2">
+                                  {(attr.candidates as Record<string, any>[]).map((c, ci) => (
+                                    <span key={ci} className={clsx(
+                                      "flex items-center gap-1.5 text-[10px] px-2 py-0.5 rounded-full border",
+                                      Boolean(c.wasSelected)
+                                        ? "border-teal-500/40 bg-teal-500/10 text-teal-300"
+                                        : "border-aq-border bg-aq-dark text-aq-dim/70"
+                                    )}>
+                                      {Boolean(c.wasSelected) && <CheckCircle size={8} className="text-teal-400" />}
+                                      <span className="font-mono">{c.value != null ? String(c.value) : "null"}</span>
+                                      <span className="opacity-60">· {String(c.sourceSystem ?? "")}</span>
+                                    </span>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </React.Fragment>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* ── Source Party IDs panel ── */}
+              {sources && sources.length > 0 && (
+                <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+                  <div className="flex items-center gap-3 px-5 py-3.5 border-b border-aq-border">
+                    <Fingerprint size={15} className="text-purple-400" />
+                    <h3 className="text-sm font-semibold text-aq-text">Contributing Source Parties</h3>
+                    <span className="ml-auto text-[10px] px-2 py-0.5 rounded-full border border-purple-500/30 bg-purple-500/10 text-purple-300 font-semibold">
+                      {sources.length} {sources.length === 1 ? "record" : "records"}
                     </span>
                   </div>
-                  {attr.confidenceScore != null && (
-                    <div className="mt-2 flex items-center gap-2">
-                      <div className="flex-1 h-1 bg-aq-border rounded-full overflow-hidden">
-                        <div className="h-full bg-teal-500 rounded-full"
-                             style={{ width: `${Number(attr.confidenceScore) * 100}%` }} />
-                      </div>
-                      <span className="text-[10px] text-aq-dim">{Math.round(Number(attr.confidenceScore) * 100)}%</span>
-                    </div>
-                  )}
-                  {/* All candidate values */}
-                  {attr.candidates && Array.isArray(attr.candidates) && attr.candidates.length > 1 && (
-                    <div className="mt-2 pt-2 border-t border-aq-border/40 space-y-1">
-                      {(attr.candidates as Record<string, any>[]).map((c, ci) => (
-                        <div key={ci} className={clsx("flex items-center gap-2 text-xs", Boolean(c.wasSelected) ? "text-aq-text" : "text-aq-dim/60")}>
-                          <span className="font-mono truncate flex-1">{c.value != null ? String(c.value) : "null"}</span>
-                          <span className="flex-shrink-0">{String(c.sourceSystem ?? "")}</span>
-                          {Boolean(c.wasSelected) && <CheckCircle size={10} className="text-teal-400 flex-shrink-0" />}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-aq-border bg-aq-dark/50">
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">#</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Source Party ID</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Source System</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Match Method</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Score</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Status</th>
+                          <th className="px-4 py-2.5 text-left text-[10px] font-semibold text-aq-dim uppercase tracking-widest">Linked</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sources.map((src: Record<string, any>, idx: number) => {
+                          const status    = String(src.status ?? "LINKED");
+                          const method    = String(src.matchMethod ?? src.linkMethod ?? "—");
+                          const score     = src.matchScore ?? src.confidenceScore;
+                          const sourceId  = String(src.sourceSystemId ?? src.globalId ?? src.id ?? "—");
+                          const sourceSys = String(src.sourceSystem ?? "Unknown");
+                          const statusCls =
+                            status === "LINKED"   ? "text-emerald-300 bg-emerald-500/15 border-emerald-500/30" :
+                            status === "SUSPECT"  ? "text-amber-300 bg-amber-500/15 border-amber-500/30"   :
+                            status === "UNLINKED" ? "text-slate-400 bg-slate-500/15 border-slate-500/30"   :
+                                                    "text-aq-dim bg-aq-dark border-aq-border";
+                          const methodCls =
+                            method === "DETERMINISTIC" ? "text-blue-300 bg-blue-500/15 border-blue-500/30"     :
+                            method === "PROBABILISTIC" ? "text-purple-300 bg-purple-500/15 border-purple-500/30" :
+                            method === "AI_MATCH"      ? "text-teal-300 bg-teal-500/15 border-teal-500/30"     :
+                                                         "text-aq-dim bg-aq-dark border-aq-border";
+                          return (
+                            <tr key={sourceId + idx} className="border-b border-aq-border/40 hover:bg-aq-border/10 transition-colors">
+                              <td className="px-4 py-2.5">
+                                <span className="text-xs text-aq-dim font-mono">{idx + 1}</span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <div className="flex items-center gap-2">
+                                  <Database size={12} className="text-purple-400 flex-shrink-0" />
+                                  <span className="text-xs font-mono text-aq-text" title={sourceId}>{sourceId}</span>
+                                </div>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className="text-xs font-medium text-aq-text">{sourceSys}</span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {method !== "—" ? (
+                                  <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded border", methodCls)}>{method}</span>
+                                ) : <span className="text-xs text-aq-dim">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                {score != null ? (
+                                  <span className="text-xs font-semibold text-blue-400">{Math.round(Number(score) * 100)}%</span>
+                                ) : <span className="text-xs text-aq-dim">—</span>}
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded border", statusCls)}>{status}</span>
+                              </td>
+                              <td className="px-4 py-2.5">
+                                <span className="text-xs text-aq-dim">{src.linkedAt ? formatDate(src.linkedAt as string) : "—"}</span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
-              ))}
+              )}
+            </div>
+
+            {/* ── Right sidebar ── */}
+            <div className="space-y-4">
+
+              {/* Attribute filter panel */}
+              {showAttrFilter && attrs.length > 0 && (
+                <AttributeFilterPanel
+                  attrs={attrs.filter(([, a]) => (a as Record<string,any>).value != null && String((a as Record<string,any>).value).trim() !== "").map(([k]) => k)}
+                  hidden={hiddenAttrs}
+                  onToggle={(key) => setHiddenAttrs((prev) => {
+                    const next = new Set(prev);
+                    next.has(key) ? next.delete(key) : next.add(key);
+                    return next;
+                  })}
+                />
+              )}
+
+              {/* Golden record identity card */}
+              <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+                <div className="flex items-center gap-2 px-4 py-3 border-b border-aq-border">
+                  <Star size={13} className="text-amber-400 fill-amber-400/30" />
+                  <span className="text-xs font-semibold text-aq-text uppercase tracking-wide">Record Identity</span>
+                </div>
+                <div className="p-4 space-y-3">
+                  {[
+                    { label: "Golden Record ID", value: golden.goldenRecordId, mono: true, accent: true },
+                    { label: "Entity Type",      value: golden.entityType },
+                    { label: "Sub Type",         value: golden.entitySubType },
+                    { label: "Status",           value: golden.status },
+                    { label: "Source Count",     value: golden.sourceCount },
+                    { label: "First Seen",       value: golden.firstSeenAt   ? formatDate(golden.firstSeenAt as string)    : null },
+                    { label: "Last Updated",     value: golden.lastUpdatedAt ? formatDate(golden.lastUpdatedAt as string)  : null },
+                  ].filter(r => r.value != null).map(({ label, value, mono, accent }) => (
+                    <div key={label} className="flex flex-col gap-0.5">
+                      <span className="text-[10px] text-aq-dim uppercase tracking-wider font-semibold">{label}</span>
+                      <span className={clsx(
+                        "text-xs break-all",
+                        mono ? "font-mono" : "font-medium",
+                        accent ? "text-amber-300/90" : "text-aq-text"
+                      )}>
+                        {String(value)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Merge history */}
+              {golden.mergeHistory && golden.mergeHistory.length > 0 && (
+                <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
+                  <div className="flex items-center gap-2 px-4 py-3 border-b border-aq-border">
+                    <CalendarClock size={13} className="text-orange-400" />
+                    <span className="text-xs font-semibold text-aq-text uppercase tracking-wide">Merge History</span>
+                    <span className="ml-auto text-[10px] text-aq-dim">{golden.mergeHistory.length} events</span>
+                  </div>
+                  <div className="divide-y divide-aq-border/40 max-h-64 overflow-y-auto">
+                    {golden.mergeHistory.map((evt: Record<string, any>, i: number) => (
+                      <div key={i} className="px-4 py-2.5 space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded border border-amber-500/30 bg-amber-500/15 text-amber-300">
+                            {String(evt.eventType ?? "")}
+                          </span>
+                          <span className="text-[10px] text-aq-dim ml-auto">{formatDateTime(evt.performedAt as string)}</span>
+                        </div>
+                        {evt.reason && <p className="text-[11px] text-aq-dim leading-snug">{String(evt.reason)}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Source systems summary chips */}
+              {sources && sources.length > 0 && (
+                <div className="bg-aq-card border border-aq-border rounded-xl p-4">
+                  <p className="text-[10px] font-semibold text-aq-dim uppercase tracking-wider mb-3">Source Systems</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Array.from(new Set(sources.map((s: Record<string, any>) => String(s.sourceSystem ?? "Unknown")))).map((sys) => (
+                      <span key={sys as string}
+                        className="flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-full border border-purple-500/30 bg-purple-500/10 text-purple-300 font-medium">
+                        <Database size={10} />
+                        {sys as string}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
-
-          {/* Source records */}
-          {sources && sources.length > 0 && (
-            <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
-              <div className="flex items-center gap-3 px-5 py-4 border-b border-aq-border">
-                <Users size={16} className="text-purple-400" />
-                <h3 className="text-sm font-semibold text-aq-text">Contributing Source Records</h3>
-                <span className="ml-auto text-xs px-2 py-0.5 rounded-full border border-aq-border text-aq-dim bg-aq-dark">
-                  {sources.length} sources
-                </span>
-              </div>
-              <div className="divide-y divide-aq-border/40">
-                {sources.map((src: Record<string, any>) => (
-                  <div key={String(src.globalId ?? src.id ?? "")}
-                       className="flex items-center gap-4 px-5 py-3 hover:bg-aq-border/10 transition-colors">
-                    <div className="w-9 h-9 rounded-lg bg-aq-dark border border-aq-border flex items-center justify-center flex-shrink-0">
-                      <Database size={15} className="text-aq-dim" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-aq-text">{String(src.sourceSystem ?? "Unknown Source")}</p>
-                      <p className="text-xs text-aq-dim font-mono truncate">{String(src.sourceSystemId ?? src.globalId ?? "")}</p>
-                    </div>
-                    <div className="text-right flex-shrink-0">
-                      <p className="text-xs text-aq-dim">Last Updated</p>
-                      <p className="text-xs text-aq-text">{formatDate(src.sourceLastUpdated as string)}</p>
-                    </div>
-                    {src.confidenceScore != null && (
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-xs text-aq-dim">Score</p>
-                        <p className="text-xs font-semibold text-blue-400">
-                          {Math.round(Number(src.confidenceScore) * 100)}%
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Merge history */}
-          {golden.mergeHistory && golden.mergeHistory.length > 0 && (
-            <div className="bg-aq-card border border-aq-border rounded-xl overflow-hidden">
-              <div className="flex items-center gap-3 px-5 py-4 border-b border-aq-border">
-                <Clock size={16} className="text-orange-400" />
-                <h3 className="text-sm font-semibold text-aq-text">Merge History</h3>
-              </div>
-              <div className="divide-y divide-aq-border/40">
-                {golden.mergeHistory.map((evt: Record<string, any>, i: number) => (
-                  <div key={i} className="flex items-center gap-3 px-5 py-3">
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-amber-500/30 bg-amber-500/15 text-amber-300">
-                      {String(evt.eventType ?? "")}
-                    </span>
-                    <span className="text-xs text-aq-dim flex-1">{String(evt.reason ?? "")}</span>
-                    <span className="text-xs text-aq-dim flex-shrink-0">{formatDateTime(evt.performedAt as string)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
       )}
 
@@ -438,7 +865,7 @@ function GoldenRecordLookup({ views }: { views: Record<string, any>[] }) {
           <div>
             <p className="text-base font-semibold text-aq-text">Explore a Golden Record</p>
             <p className="text-sm text-aq-dim mt-1 max-w-xs">
-              Select a golden view and enter a party golden ID above to see how survivorship rules govern the record
+              Select a golden view and search by Golden ID or customer name to see how survivorship rules govern the record
             </p>
           </div>
         </div>

@@ -403,8 +403,12 @@ const SUITE_LABEL: Record<string, string> = {
   SURVIVORSHIP: "Survivorship Engine",
   GOLDEN_RECORD:"Golden Record Service",
   TIMELINE:     "Timeline & Audit",
-  ML_TRAINING:  "ML Training Pipeline",
-  REGRESSION:   "End-to-End Regression",
+  ML_TRAINING:    "ML Training Pipeline",
+  SURVIVORSHIP_RULES: "Survivorship Rules Engine",
+  STEWARD_OPS:    "Steward Operations",
+  RELATIONSHIP:   "Relationship Management Engine",
+  SETTINGS:       "MDM Settings Validation",
+  REGRESSION:     "End-to-End Regression",
 };
 
 function ComponentRow({ comp }: { comp: ReportComponent }) {
@@ -632,12 +636,15 @@ const SUITE_DESCRIPTIONS: Record<string, string> = {
   GOLDEN_RECORD:"Golden record service — creation, attributes, multi-source",
   TIMELINE:     "Timeline event persistence, ordering, service integration",
   ML_TRAINING:  "ML training pipeline — mode config, feature extraction, dedup, balancing",
+  STEWARD_OPS:  "Steward golden ID operations — merge, split, unlink, relink",
+  RELATIONSHIP: "Relationship CRUD, cardinality, temporal, search, graph traversal, duplicate guard, bulk ops",
+  SETTINGS:     "Threshold ordering, DQ weights, survivorship strategies, security bounds, GDPR rules, notification bounds",
   REGRESSION:   "End-to-end ingest pipeline scenarios with cleanup",
 };
 
 // Fast single-suite threshold — use sync endpoint; above this use async
 const SYNC_SUITES = new Set(["API_HEALTH", "MATCHING", "BLOCKING", "SURVIVORSHIP",
-                              "GOLDEN_RECORD", "TIMELINE", "ML_TRAINING"]);
+                              "GOLDEN_RECORD", "TIMELINE", "ML_TRAINING", "RELATIONSHIP", "SETTINGS"]);
 
 export default function TestLab() {
   const { user } = useAuthStore();

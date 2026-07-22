@@ -343,10 +343,11 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
   const [op, setOp] = useState<GoldenOp>("split");
 
   // Shared inputs
-  const [goldenId, setGoldenId]       = useState("");
-  const [sourceId, setSourceId]       = useState("");
-  const [toGoldenId, setToGoldenId]   = useState("");
-  const [reason, setReason]           = useState("");
+  const [goldenId, setGoldenId]         = useState("");
+  const [sourceId, setSourceId]         = useState("");
+  const [sourceSystem, setSourceSystem] = useState("");
+  const [toGoldenId, setToGoldenId]     = useState("");
+  const [reason, setReason]             = useState("");
   const [result, setResult]           = useState<Record<string, any> | null>(null);
 
   // Preview cluster for split & unlink
@@ -365,12 +366,12 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
     onError: () => toast.error("Split failed"),
   });
   const unlinkMut = useMutation({
-    mutationFn: () => stewardApi.unlinkSource(sourceId.trim(), goldenId.trim(), reason || "Steward unlink"),
+    mutationFn: () => stewardApi.unlinkSource(sourceId.trim(), goldenId.trim(), reason || "Steward unlink", sourceSystem.trim() || undefined),
     onSuccess: (d) => { setResult(d); qc.invalidateQueries({ queryKey: ["steward-tasks"] }); },
     onError: () => toast.error("Unlink failed"),
   });
   const relinkMut = useMutation({
-    mutationFn: () => stewardApi.relinkSource(sourceId.trim(), goldenId.trim(), toGoldenId.trim(), reason || "Steward relink"),
+    mutationFn: () => stewardApi.relinkSource(sourceId.trim(), goldenId.trim(), toGoldenId.trim(), reason || "Steward relink", sourceSystem.trim() || undefined),
     onSuccess: (d) => { setResult(d); qc.invalidateQueries({ queryKey: ["steward-tasks"] }); },
     onError: () => toast.error("Relink failed"),
   });
@@ -378,7 +379,7 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
   const pending = splitMut.isPending || unlinkMut.isPending || relinkMut.isPending;
 
   // Reset result when op or inputs change
-  useEffect(() => { setResult(null); }, [op, goldenId, sourceId, toGoldenId]);
+  useEffect(() => { setResult(null); }, [op, goldenId, sourceId, sourceSystem, toGoldenId]);
 
   // Close on Escape
   useEffect(() => {
@@ -449,7 +450,7 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
           <div className="flex items-start gap-3 bg-amber-500/8 border border-amber-500/25 rounded-xl px-4 py-3">
             <TriangleAlert size={15} className="text-amber-400 flex-shrink-0 mt-0.5" />
             <p className="text-xs text-amber-300 leading-relaxed">
-              {op === "split"  && "All source records under this golden ID will be split into individual entities. This cannot be automatically undone."}
+              {op === "split"  && "Each source record will be restored to its PREVIOUS golden ID from timeline history. Records that were always native to this cluster stay unchanged. If no merge history exists, the split is blocked — use Unlink or Relink instead."}
               {op === "unlink" && "The source record will be removed from its cluster and get a new standalone golden ID. The original cluster will be re-evaluated."}
               {op === "relink" && "The source record will be moved to a different golden cluster. Both clusters will be re-evaluated with survivorship rules."}
             </p>
@@ -504,14 +505,9 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
                           <span className="text-[11px] text-slate-500 ml-2">{s.sourceSystem}</span>
                         </div>
                         <span className="text-[11px] text-slate-400 truncate max-w-[120px]">{s.fullName || "—"}</span>
-                        {op === "unlink" && (
-                          <button onClick={() => setSourceId(s.sourceSystemId)}
-                            className="text-[10px] text-purple-400 hover:text-purple-300 underline flex-shrink-0">
-                            Select
-                          </button>
-                        )}
-                        {op === "relink" && (
-                          <button onClick={() => setSourceId(s.sourceSystemId)}
+                        {(op === "unlink" || op === "relink") && (
+                          <button
+                            onClick={() => { setSourceId(s.sourceSystemId); setSourceSystem(s.sourceSystem); }}
                             className="text-[10px] text-purple-400 hover:text-purple-300 underline flex-shrink-0">
                             Select
                           </button>
@@ -523,21 +519,36 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
               </div>
             )}
 
-            {/* Source System ID (unlink + relink) */}
+            {/* Source System + Source System ID (unlink + relink) */}
             {(op === "unlink" || op === "relink") && (
-              <div>
-                <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide block mb-1.5">
-                  Source System ID *
-                </label>
-                <input
-                  value={sourceId}
-                  onChange={e => setSourceId(e.target.value)}
-                  placeholder="e.g. 02112411"
-                  className="w-full bg-slate-800 border border-slate-600 text-white placeholder-slate-500
-                             rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-purple-500/50"
-                />
-                <p className="text-[10px] text-slate-500 mt-1">
-                  Click "Select" on a row above to fill this automatically
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide block mb-1.5">
+                    Source System
+                    <span className="text-slate-600 font-normal ml-1">(recommended)</span>
+                  </label>
+                  <input
+                    value={sourceSystem}
+                    onChange={e => setSourceSystem(e.target.value)}
+                    placeholder="e.g. Trust"
+                    className="w-full bg-slate-800 border border-slate-600 text-white placeholder-slate-500
+                               rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500/50"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide block mb-1.5">
+                    Source System ID *
+                  </label>
+                  <input
+                    value={sourceId}
+                    onChange={e => setSourceId(e.target.value)}
+                    placeholder="e.g. 02112411"
+                    className="w-full bg-slate-800 border border-slate-600 text-white placeholder-slate-500
+                               rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-purple-500/50"
+                  />
+                </div>
+                <p className="col-span-2 text-[10px] text-slate-500 -mt-2">
+                  Click "Select" on a row above to fill both fields automatically
                 </p>
               </div>
             )}
@@ -579,32 +590,71 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
               "rounded-xl border p-4 space-y-2",
               result.status === "SPLIT" || result.status === "UNLINKED" || result.status === "RELINKED"
                 ? "bg-emerald-500/8 border-emerald-500/25"
+                : result.status === "NEVER_MERGED"
+                ? "bg-amber-500/8 border-amber-500/25"
                 : "bg-red-500/8 border-red-500/25"
             )}>
               <div className="flex items-center gap-2">
-                {(result.status === "SPLIT" || result.status === "UNLINKED" || result.status === "RELINKED")
+                {result.status === "SPLIT" || result.status === "UNLINKED" || result.status === "RELINKED"
                   ? <CheckCircle2 size={15} className="text-emerald-400" />
+                  : result.status === "NEVER_MERGED"
+                  ? <TriangleAlert size={15} className="text-amber-400" />
                   : <XCircle size={15} className="text-red-400" />}
                 <span className={clsx("text-sm font-semibold",
                   result.status === "SPLIT" || result.status === "UNLINKED" || result.status === "RELINKED"
-                    ? "text-emerald-300" : "text-red-300")}>
-                  {result.status}
+                    ? "text-emerald-300"
+                    : result.status === "NEVER_MERGED"
+                    ? "text-amber-300"
+                    : "text-red-300")}>
+                  {result.status === "NEVER_MERGED" ? "Cannot Split" : result.status}
                 </span>
               </div>
-              <p className="text-xs text-slate-300">{result.message}</p>
+              <p className="text-xs text-slate-300 leading-relaxed">{result.message}</p>
 
-              {/* Split results table */}
-              {result.results && result.results.length > 0 && (
-                <div className="mt-3 space-y-1 max-h-48 overflow-y-auto">
-                  <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1">Records updated:</p>
-                  {result.results.map((r: Record<string, string>, i: number) => (
-                    <div key={i} className="flex items-center gap-2 text-[11px] bg-slate-800/60 rounded px-2 py-1.5">
-                      <span className="font-mono text-slate-300 flex-shrink-0">{r.sourceSystemId}</span>
-                      <span className="text-slate-500 flex-shrink-0">{r.sourceSystem}</span>
-                      <span className="text-slate-600 flex-shrink-0">→</span>
-                      <span className="font-mono text-emerald-400 flex-shrink-0">{r.newGoldenId}</span>
-                    </div>
-                  ))}
+              {/* NEVER_MERGED suggestion */}
+              {result.status === "NEVER_MERGED" && result.suggestion && (
+                <div className="mt-2 flex items-start gap-2 bg-slate-800/60 rounded-lg px-3 py-2">
+                  <Info size={12} className="text-slate-400 flex-shrink-0 mt-0.5" />
+                  <p className="text-[11px] text-slate-400">{result.suggestion}</p>
+                </div>
+              )}
+
+              {/* Split results table — shows restored vs unchanged */}
+              {result.results && result.results.length > 0 && result.status === "SPLIT" && (
+                <div className="mt-3 space-y-1 max-h-52 overflow-y-auto">
+                  <div className="flex items-center gap-4 text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-1 px-2">
+                    <span className="flex-1">Source</span>
+                    <span className="w-28 text-center">From Golden</span>
+                    <span className="w-5">→</span>
+                    <span className="w-28 text-center">Restored To</span>
+                    <span className="w-16 text-center">Action</span>
+                  </div>
+                  {result.results.map((r: Record<string, string>, i: number) => {
+                    const wasRestored = r.action === "RESTORED_TO_PREVIOUS";
+                    return (
+                      <div key={i} className={clsx(
+                        "flex items-center gap-2 text-[11px] rounded px-2 py-1.5",
+                        wasRestored ? "bg-emerald-500/8" : "bg-slate-800/40"
+                      )}>
+                        <div className="flex-1 min-w-0">
+                          <span className="font-mono text-slate-200">{r.sourceSystemId}</span>
+                          <span className="text-slate-500 ml-1.5">{r.sourceSystem}</span>
+                        </div>
+                        <span className="font-mono text-slate-500 w-28 text-center truncate">{r.fromGoldenId}</span>
+                        <span className="text-slate-600">→</span>
+                        <span className={clsx("font-mono w-28 text-center truncate",
+                          wasRestored ? "text-emerald-400" : "text-slate-500")}>
+                          {r.toGoldenId}
+                        </span>
+                        <span className={clsx("text-[9px] font-bold px-1.5 py-0.5 rounded w-16 text-center flex-shrink-0",
+                          wasRestored
+                            ? "text-emerald-400 bg-emerald-500/15 border border-emerald-500/25"
+                            : "text-slate-500 bg-slate-700/40 border border-slate-600/25")}>
+                          {wasRestored ? "RESTORED" : "NATIVE"}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -614,7 +664,7 @@ function GoldenOpsModal({ onClose }: { onClose: () => void }) {
                   New golden ID: <span className="text-emerald-400">{result.newGoldenId}</span>
                 </div>
               )}
-              {result.toGoldenId && (
+              {result.toGoldenId && !result.results && (
                 <div className="text-[11px] font-mono text-slate-400 mt-1">
                   Moved to: <span className="text-emerald-400">{result.toGoldenId}</span>
                 </div>

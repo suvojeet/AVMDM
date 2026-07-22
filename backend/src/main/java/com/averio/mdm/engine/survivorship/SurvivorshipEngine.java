@@ -26,6 +26,11 @@ public class SurvivorshipEngine {
     private final MostRecentStrategy mostRecentStrategy;
     private final MostFrequentStrategy mostFrequentStrategy;
 
+    private static final Set<String> NAME_ATTRIBUTES = Set.of(
+            "firstName", "lastName", "middleName", "fullName",
+            "organizationName", "legalName"
+    );
+
     private static final List<String> PARTY_ATTRIBUTES = List.of(
             "firstName", "lastName", "middleName", "fullName", "dateOfBirth",
             "gender", "nationality", "organizationName", "legalName",
@@ -166,13 +171,17 @@ public class SurvivorshipEngine {
             }
         }
 
+        // Uppercase name attributes in the golden record
+        final Object goldenValue = (winningValue instanceof String s && NAME_ATTRIBUTES.contains(attribute))
+                ? s.toUpperCase() : winningValue;
+
         // Mark selected candidate
         candidates.forEach(c -> c.setWasSelected(
                 c.getSourceSystem().equals(winningSource) && Objects.equals(c.getValue(), winningValue)));
 
         return GoldenRecord.GoldenAttribute.builder()
                 .attributeName(attribute)
-                .value(winningValue)
+                .value(goldenValue)
                 .winningSourceSystem(winningSource)
                 .survivorshipRule(ruleType)
                 .confidenceScore(calculateAttributeConfidence(candidates, winningValue))

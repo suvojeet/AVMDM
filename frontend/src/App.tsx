@@ -36,7 +36,9 @@ import TestLabDocs from "./pages/docs/TestLabDocs";
 import TestLab from "./pages/testlab/TestLab";
 import HelpDocs from "./pages/help/HelpDocs";
 import Webhooks from "./pages/settings/Webhooks";
+import SettingsPage from "./pages/settings/Settings";
 import ExtensionDocs from "./pages/docs/ExtensionDocs";
+import LoggingDocs from "./pages/docs/LoggingDocs";
 import PlatformAdminRoute from "./components/layout/PlatformAdminRoute";
 import PlatformLayout from "./components/layout/PlatformLayout";
 import PlatformDashboard from "./pages/platform/PlatformDashboard";
@@ -47,6 +49,8 @@ import SystemConfig from "./pages/platform/SystemConfig";
 import UserManagement from "./pages/platform/UserManagement";
 import ReleaseManagement from "./pages/platform/ReleaseManagement";
 import UsageAnalytics from "./pages/platform/UsageAnalytics";
+import ReportCenter from "./pages/platform/ReportCenter";
+import KnowledgeGraph from "./pages/knowledge/KnowledgeGraph";
 
 // ── License gate wrapper ───────────────────────────────────────────────────
 
@@ -144,8 +148,12 @@ export default function App() {
             <Route path="docs/test-lab"    element={<TestLabDocs />} />
             <Route path="test-lab"         element={<TestLab />} />
             <Route path="help"             element={<HelpDocs />} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="settings/webhooks" element={<Webhooks />} />
             <Route path="docs/extensions"  element={<ExtensionDocs />} />
+            <Route path="docs/logging"     element={<LoggingDocs />} />
+            <Route path="reports"          element={<ReportCenter />} />
+            <Route path="knowledge-graph"  element={<KnowledgeGraph />} />
           </Route>
         </Route>
         {/* ── Averio Control Plane — PLATFORM_ADMIN only ── */}
@@ -159,6 +167,7 @@ export default function App() {
             <Route path="users"     element={<UserManagement />} />
             <Route path="releases"  element={<ReleaseManagement />} />
             <Route path="analytics" element={<UsageAnalytics />} />
+            <Route path="reports"   element={<ReportCenter />} />
           </Route>
         </Route>
         <Route path="*" element={<Navigate to="/dashboard" replace />} />

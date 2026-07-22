@@ -249,7 +249,7 @@ function Section({ id, title, icon: Icon, color, children }: {
   );
 }
 
-function Callout({ type, children }: { type: "info" | "warning" | "success" }) {
+function Callout({ type, children }: { type: "info" | "warning" | "success"; children: React.ReactNode }) {
   const cfg = {
     info:    { icon: Info,         cls: "border-aq-blue/30  bg-aq-blue/5   text-aq-blue-2/80"   },
     warning: { icon: AlertCircle,  cls: "border-amber-500/30 bg-amber-500/5  text-amber-400/80" },

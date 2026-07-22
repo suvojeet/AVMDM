@@ -2,7 +2,7 @@ import { NavLink, useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Building2, CreditCard, ToggleLeft,
   Settings2, Users, GitBranch, ChevronLeft, ChevronRight,
-  LogOut, ShieldAlert, BarChart3,
+  LogOut, ShieldAlert, BarChart3, FileDown,
 } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
@@ -20,6 +20,7 @@ const NAV_ITEMS = [
   { to: "/platform/users",     icon: Users,           label: "User Management"              },
   { to: "/platform/releases",  icon: GitBranch,       label: "Release Management"           },
   { to: "/platform/analytics", icon: BarChart3,       label: "Usage Analytics"              },
+  { to: "/platform/reports",   icon: FileDown,        label: "Report Center"                },
 ];
 
 // ── Component ──────────────────────────────────────────────────────────────────

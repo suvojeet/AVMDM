@@ -8,6 +8,8 @@ import com.averio.mdm.engine.matching.ProbabilisticMatcher;
 import com.averio.mdm.engine.matching.DeterministicMatcher;
 import com.averio.mdm.repository.cosmos.PartyDocRepository;
 import com.averio.mdm.repository.neo4j.PartyRepository;
+import com.averio.mdm.domain.timeline.TimelineEvent;
+import com.averio.mdm.repository.cosmos.TimelineRepository;
 import com.averio.mdm.service.GoldenRecordService;
 import com.averio.mdm.service.StewardService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,6 +44,9 @@ public class StewardController {
 
     @Autowired(required = false)
     private PartyDocRepository partyDocRepository;
+
+    @Autowired(required = false)
+    private TimelineRepository timelineRepository;
 
     @Autowired(required = false)
     private ProbabilisticMatcher probabilisticMatcher;
@@ -481,28 +486,66 @@ public class StewardController {
             } catch (Exception ignored) { /* Neo4j unavailable */ }
         }
         // 2. Fall back to Cosmos
-        if (partyDocRepository == null) return null;
-        try {
-            // Try globalId from taskData
-            if (taskData != null && taskData.get(globalIdKey) instanceof String gid) {
-                var doc = partyDocRepository.findByGlobalId(gid);
-                if (doc.isPresent()) return partyDocToParty(doc.get());
-            }
-            // Try candidateId as globalId
-            if (candidateId != null && candidateId.startsWith("P-")) {
+        if (partyDocRepository != null) {
+            try {
+                // Try globalId from taskData
+                if (taskData != null && taskData.get(globalIdKey) instanceof String gid) {
+                    var doc = partyDocRepository.findByGlobalId(gid);
+                    if (doc.isPresent()) return partyDocToParty(doc.get());
+                }
+                // Try candidateId as globalId
+                if (candidateId != null && candidateId.startsWith("P-")) {
+                    var doc = partyDocRepository.findByGlobalId(candidateId);
+                    if (doc.isPresent()) return partyDocToParty(doc.get());
+                }
+                // Try sourceId from taskData
+                if (taskData != null && taskData.get(sourceIdKey) instanceof String sid) {
+                    var docs = partyDocRepository.findBySourceSystemId(sid);
+                    if (!docs.isEmpty()) return partyDocToParty(docs.get(0));
+                }
+                // Try candidateId as globalId (last resort)
                 var doc = partyDocRepository.findByGlobalId(candidateId);
                 if (doc.isPresent()) return partyDocToParty(doc.get());
-            }
-            // Try sourceId from taskData
-            if (taskData != null && taskData.get(sourceIdKey) instanceof String sid) {
-                var docs = partyDocRepository.findBySourceSystemId(sid);
-                if (!docs.isEmpty()) return partyDocToParty(docs.get(0));
-            }
-            // Try candidateId as globalId (last resort)
-            var doc = partyDocRepository.findByGlobalId(candidateId);
-            if (doc.isPresent()) return partyDocToParty(doc.get());
-        } catch (Exception ignored) { }
+            } catch (Exception ignored) { }
+        }
+        // 3. Last resort — reconstruct a display-only Party shell from snapshot embedded in taskData.
+        //    Demo/seeded tasks embed partySnapshot1 / partySnapshot2 so the match-detail panel
+        //    always has something to show even when neither Neo4j nor Cosmos holds the record.
+        String snapshotKey = sourceIdKey.contains("1") ? "partySnapshot1" : "partySnapshot2";
+        if (taskData != null && taskData.get(snapshotKey) instanceof Map<?,?> rawSnap) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> snap = (Map<String, Object>) rawSnap;
+            return partyFromSnapshot(snap, candidateId);
+        }
         return null;
+    }
+
+    /** Build a lightweight display-only Party from a taskData snapshot map. */
+    @SuppressWarnings("unchecked")
+    private Party partyFromSnapshot(Map<String, Object> snap, String fallbackId) {
+        Party.PartyBuilder b = Party.builder()
+                .globalId(snap.getOrDefault("globalId", fallbackId).toString())
+                .goldenRecordId(snap.getOrDefault("goldenRecordId", fallbackId).toString())
+                .partyType(snap.getOrDefault("partyType", "ORGANIZATION").toString())
+                .fullName(str(snap, "fullName"))
+                .firstName(str(snap, "firstName"))
+                .lastName(str(snap, "lastName"))
+                .organizationName(str(snap, "organizationName"))
+                .sourceSystem(str(snap, "sourceSystem"))
+                .sourceSystemId(str(snap, "sourceSystemId"))
+                .taxId(str(snap, "taxId"))
+                .dunsNumber(str(snap, "dunsNumber"))
+                .lei(str(snap, "lei"))
+                .nationality(str(snap, "nationality"))
+                .status(snap.getOrDefault("status", "ACTIVE").toString());
+        if (snap.get("dateOfBirth") != null) {
+            try { b.dateOfBirth(java.time.LocalDate.parse(snap.get("dateOfBirth").toString())); }
+            catch (Exception ignored) { }
+        }
+        // Embed email/phone if present
+        if (snap.get("email") != null) b.emails(Map.of("primary", snap.get("email").toString()));
+        if (snap.get("phone") != null) b.phones(Map.of("primary", snap.get("phone").toString()));
+        return b.build();
     }
 
     /**
@@ -739,107 +782,210 @@ public class StewardController {
     /**
      * POST /api/v1/steward/split-golden?goldenRecordId=0023626574
      *
-     * SPLIT: Every source record under goldenRecordId gets its own brand-new golden ID.
-     * Supports multi-level split — if any of those sources were themselves previously
-     * merged clusters, each individual source still becomes its own entity.
+     * SPLIT: Each source record under goldenRecordId is restored to its PREVIOUS golden ID
+     * as recorded in the timeline (PARTY_JOINED_CLUSTER / INGEST_AUTO_LINKED events).
      *
-     * Response: list of { sourceSystemId, oldGoldenId, newGoldenId }
+     * Rules:
+     * - If ALL parties under the golden ID have ALWAYS had this same golden ID (never merged
+     *   in from somewhere else), the split is rejected: the cluster was never collapsed.
+     * - If at least one party was merged in from a different golden ID, those parties are
+     *   restored to their previous golden ID.  Parties that were always native to this golden
+     *   ID stay on it (they have nowhere meaningful to go back to).
+     * - Multi-level: the "previous" golden ID is the immediate predecessor from the timeline,
+     *   not an arbitrary one — so chaining multiple splits works correctly.
      */
     @PostMapping("/split-golden")
-    @Operation(summary = "Split all source records under a golden ID — each gets a new individual golden ID")
+    @Operation(summary = "Split merged sources back to their previous golden IDs using timeline history")
     public ResponseEntity<Map<String, Object>> splitGolden(
             @RequestParam String goldenRecordId,
-            @RequestParam(defaultValue = "SPLIT") String reason,
+            @RequestParam(defaultValue = "STEWARD_SPLIT") String reason,
             @AuthenticationPrincipal Jwt jwt) {
 
         String user = jwt != null ? jwt.getClaimAsString("preferred_username") : "STEWARD";
-        List<Map<String, String>> results = new ArrayList<>();
-        int updated = 0;
+        Map<String, Object> response = new LinkedHashMap<>();
 
+        // ── 1. Collect the cluster ────────────────────────────────────────────
+        List<com.averio.mdm.domain.cosmos.PartyDoc> cluster = new ArrayList<>();
         if (partyDocRepository != null) {
-            // Find all Cosmos docs in the cluster
             List<com.averio.mdm.domain.cosmos.PartyDoc> all = new ArrayList<>();
             partyDocRepository.findAll().forEach(all::add);
-
-            List<com.averio.mdm.domain.cosmos.PartyDoc> cluster = all.stream()
+            cluster = all.stream()
                     .filter(d -> goldenRecordId.equals(d.getGoldenRecordId()))
                     .collect(java.util.stream.Collectors.toList());
+        }
+        if (cluster.isEmpty()) {
+            response.put("status",  "NO_RECORDS_FOUND");
+            response.put("message", "No records found under golden ID " + goldenRecordId);
+            return ResponseEntity.ok(response);
+        }
 
-            log.info("splitGolden: goldenId={} clusterSize={} by={}", goldenRecordId, cluster.size(), user);
+        log.info("splitGolden: goldenId={} clusterSize={} by={}", goldenRecordId, cluster.size(), user);
 
-            for (com.averio.mdm.domain.cosmos.PartyDoc doc : cluster) {
-                String newGoldenId = generateCosmosGoldenId();
-                doc.setGoldenRecordId(newGoldenId);
+        // ── 2. For each party, look up its previous golden ID from the timeline ─
+        // Timeline events are partitioned by entityId = golden record ID.
+        // PARTY_JOINED_CLUSTER events on this golden ID have newValues.partyGlobalId + newValues.fromGoldenId.
+        // INGEST_AUTO_LINKED events on this golden ID tell us a party arrived via auto-link
+        //   (in that case the party's original golden ID was a provisional one created just before).
+        // We also scan the party's source-system timeline by looking for events keyed by the party's
+        // own previous golden ID that contain its globalId.
+
+        Map<String, String> previousGoldenByGlobalId = new LinkedHashMap<>(); // globalId → previousGoldenId
+
+        if (timelineRepository != null) {
+            try {
+                // Events stored under the CURRENT golden ID
+                List<TimelineEvent> events = timelineRepository
+                        .findByEntityIdAndEventTypeIn(goldenRecordId,
+                                List.of("PARTY_JOINED_CLUSTER", "INGEST_AUTO_LINKED", "MERGE"));
+
+                for (TimelineEvent ev : events) {
+                    Map<String, Object> vals = ev.getNewValues();
+                    if (vals == null) continue;
+
+                    String partyGlobalId = vals.get("partyGlobalId") != null
+                            ? vals.get("partyGlobalId").toString() : null;
+                    String fromGoldenId  = vals.get("fromGoldenId") != null
+                            ? vals.get("fromGoldenId").toString()
+                            : (vals.get("mergedGoldenId") != null
+                                ? vals.get("mergedGoldenId").toString() : null);
+
+                    if (partyGlobalId != null && fromGoldenId != null
+                            && !fromGoldenId.equals(goldenRecordId)) {
+                        // Keep the MOST RECENT "from" for this party (last merge wins)
+                        previousGoldenByGlobalId.put(partyGlobalId, fromGoldenId);
+                    }
+                }
+
+                // Also check PARTY_AUTO_MERGED events — metadata stored in newValues
+                List<TimelineEvent> mergedEvents = timelineRepository
+                        .findByEntityIdAndEventTypeIn(goldenRecordId, List.of("PARTY_AUTO_MERGED"));
+                for (TimelineEvent ev : mergedEvents) {
+                    Map<String, Object> vals = ev.getNewValues();
+                    if (vals == null) continue;
+                    String mergedGolden = vals.get("mergedGoldenId") != null
+                            ? vals.get("mergedGoldenId").toString() : null;
+                    if (mergedGolden != null && !mergedGolden.equals(goldenRecordId)) {
+                        // All parties that came from mergedGolden → restore to mergedGolden
+                        for (com.averio.mdm.domain.cosmos.PartyDoc doc : cluster) {
+                            if (!previousGoldenByGlobalId.containsKey(doc.getGlobalId())) {
+                                // Find which parties originally belonged to mergedGolden
+                                // by checking if their sourceSystemId matches what was merged
+                                String srcId = vals.get("sourceId2") != null
+                                        ? vals.get("sourceId2").toString() : null;
+                                if (srcId != null && srcId.equals(doc.getSourceSystemId())) {
+                                    previousGoldenByGlobalId.put(doc.getGlobalId(), mergedGolden);
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                log.warn("splitGolden: timeline lookup failed (non-fatal): {}", e.getMessage());
+            }
+        }
+
+        // ── 3. Guard: if NO party has a different previous golden ID, reject the split ─
+        // A cluster is "never collapsed" if every party's earliest recorded golden ID
+        // equals the current one — meaning no merge ever brought them together.
+        long partiesWithHistory = cluster.stream()
+                .filter(d -> previousGoldenByGlobalId.containsKey(d.getGlobalId()))
+                .count();
+
+        if (partiesWithHistory == 0) {
+            response.put("status",  "NEVER_MERGED");
+            response.put("message", "Cannot split: no merge history found for golden ID " + goldenRecordId
+                + ". All " + cluster.size() + " source record(s) appear to have always shared this golden ID. "
+                + "Use Unlink to give a record a new standalone golden ID, or Relink to move it to an existing one.");
+            response.put("goldenRecordId", goldenRecordId);
+            response.put("clusterSize",    cluster.size());
+            response.put("suggestion",     "Try UNLINK (creates new golden ID for one source) or RELINK (moves source to an existing golden ID)");
+            return ResponseEntity.ok(response);
+        }
+
+        // ── 4. Apply the split ────────────────────────────────────────────────
+        List<Map<String, String>> results = new ArrayList<>();
+        int restored = 0;
+        int unchanged = 0;
+
+        for (com.averio.mdm.domain.cosmos.PartyDoc doc : cluster) {
+            String prevGolden = previousGoldenByGlobalId.get(doc.getGlobalId());
+
+            if (prevGolden != null) {
+                // Restore to previous golden ID
+                doc.setGoldenRecordId(prevGolden);
                 doc.setStatus("ACTIVE");
                 doc.setUpdatedAt(java.time.LocalDateTime.now());
                 doc.setUpdatedBy(user);
                 partyDocRepository.save(doc);
-                results.add(Map.of(
+                results.add(new LinkedHashMap<>(Map.of(
                     "globalId",      doc.getGlobalId(),
                     "sourceSystem",  doc.getSourceSystem() != null ? doc.getSourceSystem() : "",
                     "sourceSystemId",doc.getSourceSystemId() != null ? doc.getSourceSystemId() : "",
-                    "oldGoldenId",   goldenRecordId,
-                    "newGoldenId",   newGoldenId
-                ));
-                updated++;
-                log.info("splitGolden: {} ({}) → new golden {}", doc.getSourceSystemId(), doc.getSourceSystem(), newGoldenId);
+                    "fromGoldenId",  goldenRecordId,
+                    "toGoldenId",    prevGolden,
+                    "action",        "RESTORED_TO_PREVIOUS"
+                )));
+                restored++;
+                log.info("splitGolden: {} ({}) restored {} → {}",
+                        doc.getSourceSystemId(), doc.getSourceSystem(), goldenRecordId, prevGolden);
+            } else {
+                // This party was always native to this golden ID — leave it here
+                results.add(new LinkedHashMap<>(Map.of(
+                    "globalId",      doc.getGlobalId(),
+                    "sourceSystem",  doc.getSourceSystem() != null ? doc.getSourceSystem() : "",
+                    "sourceSystemId",doc.getSourceSystemId() != null ? doc.getSourceSystemId() : "",
+                    "fromGoldenId",  goldenRecordId,
+                    "toGoldenId",    goldenRecordId,
+                    "action",        "UNCHANGED_NATIVE"
+                )));
+                unchanged++;
+                log.info("splitGolden: {} ({}) is native to golden {} — left unchanged",
+                        doc.getSourceSystemId(), doc.getSourceSystem(), goldenRecordId);
             }
         }
 
-        // Also attempt Neo4j split
+        // ── 5. Neo4j mirror (best-effort) ─────────────────────────────────────
         if (partyRepository != null) {
             try {
-                List<com.averio.mdm.domain.entity.Party> neo4jCluster =
-                        partyRepository.findByGoldenRecordId(goldenRecordId);
-                for (com.averio.mdm.domain.entity.Party p : neo4jCluster) {
-                    String newGoldenId = generateCosmosGoldenId();
-                    p.setGoldenRecordId(newGoldenId);
-                    p.setStatus("ACTIVE");
-                    p.setUpdatedAt(java.time.LocalDateTime.now());
-                    p.setUpdatedBy(user);
-                    partyRepository.save(p);
-                    // Only add to results if not already added from Cosmos
-                    boolean alreadyAdded = results.stream()
-                            .anyMatch(r -> p.getGlobalId().equals(r.get("globalId")));
-                    if (!alreadyAdded) {
-                        results.add(Map.of(
-                            "globalId",       p.getGlobalId(),
-                            "sourceSystem",   p.getSourceSystem() != null ? p.getSourceSystem() : "",
-                            "sourceSystemId", p.getSourceSystemId() != null ? p.getSourceSystemId() : "",
-                            "oldGoldenId",    goldenRecordId,
-                            "newGoldenId",    newGoldenId
-                        ));
-                        updated++;
+                partyRepository.findByGoldenRecordId(goldenRecordId).forEach(p -> {
+                    String prevGolden = previousGoldenByGlobalId.get(p.getGlobalId());
+                    if (prevGolden != null) {
+                        p.setGoldenRecordId(prevGolden);
+                        p.setStatus("ACTIVE");
+                        p.setUpdatedAt(java.time.LocalDateTime.now());
+                        p.setUpdatedBy(user);
+                        partyRepository.save(p);
                     }
-                }
+                });
             } catch (Exception e) {
-                log.warn("splitGolden Neo4j step failed (non-fatal): {}", e.getMessage());
+                log.warn("splitGolden Neo4j mirror failed (non-fatal): {}", e.getMessage());
             }
         }
 
-        Map<String, Object> response = new LinkedHashMap<>();
-        response.put("status",          updated > 0 ? "SPLIT" : "NO_RECORDS_FOUND");
-        response.put("oldGoldenId",     goldenRecordId);
-        response.put("recordsSplit",    updated);
-        response.put("reason",          reason);
-        response.put("performedBy",     user);
-        response.put("results",         results);
-        response.put("message", updated > 0
-            ? updated + " source record(s) split from golden " + goldenRecordId + ". Each now has its own golden ID."
-            : "No records found under golden ID " + goldenRecordId);
+        response.put("status",       "SPLIT");
+        response.put("goldenRecordId", goldenRecordId);
+        response.put("restored",      restored);
+        response.put("unchanged",     unchanged);
+        response.put("reason",        reason);
+        response.put("performedBy",   user);
+        response.put("results",       results);
+        response.put("message", restored + " source record(s) restored to their previous golden ID"
+            + (unchanged > 0 ? "; " + unchanged + " native record(s) left on " + goldenRecordId : "") + ".");
         return ResponseEntity.ok(response);
     }
 
     /**
-     * POST /api/v1/steward/unlink-source?sourceSystemId=02112411&currentGoldenId=0023626574
+     * POST /api/v1/steward/unlink-source?sourceSystemId=02112411&sourceSystem=Trust&currentGoldenId=0023626574
      *
      * UNLINK: Removes one source from its golden cluster and assigns it a brand-new golden ID.
-     * The original cluster is refreshed (survivorship re-runs without this source).
+     * sourceSystem is optional but recommended — disambiguates when the same sourceSystemId
+     * exists in multiple source systems.
      */
     @PostMapping("/unlink-source")
     @Operation(summary = "Remove a source record from its golden cluster — creates a new golden ID for it")
     public ResponseEntity<Map<String, Object>> unlinkSource(
             @RequestParam String sourceSystemId,
+            @RequestParam(required = false) String sourceSystem,
             @RequestParam String currentGoldenId,
             @RequestParam(defaultValue = "UNLINK") String reason,
             @AuthenticationPrincipal Jwt jwt) {
@@ -855,9 +1001,12 @@ public class StewardController {
                 List<com.averio.mdm.domain.cosmos.PartyDoc> matches =
                         partyDocRepository.findBySourceSystemId(sourceSystemId);
                 for (com.averio.mdm.domain.cosmos.PartyDoc doc : matches) {
+                    // Filter by sourceSystem when provided — prevents wrong match if same ID exists in multiple systems
+                    if (sourceSystem != null && !sourceSystem.isBlank()
+                            && !sourceSystem.equalsIgnoreCase(doc.getSourceSystem())) continue;
                     if (currentGoldenId.equals(doc.getGoldenRecordId())) {
-                        log.info("unlinkSource: Cosmos {} from golden {} → new golden {}",
-                                sourceSystemId, currentGoldenId, newGoldenId);
+                        log.info("unlinkSource: Cosmos {} ({}) from golden {} → new golden {}",
+                                sourceSystemId, doc.getSourceSystem(), currentGoldenId, newGoldenId);
                         doc.setGoldenRecordId(newGoldenId);
                         doc.setStatus("ACTIVE");
                         doc.setUpdatedAt(java.time.LocalDateTime.now());
@@ -875,7 +1024,9 @@ public class StewardController {
         if (partyRepository != null) {
             try {
                 List<com.averio.mdm.domain.entity.Party> neo4jMatches =
-                        partyRepository.findBySourceSystemIdOnly(sourceSystemId);
+                        (sourceSystem != null && !sourceSystem.isBlank())
+                            ? partyRepository.findBySourceSystemAndSourceSystemId(sourceSystem, sourceSystemId)
+                            : partyRepository.findBySourceSystemIdOnly(sourceSystemId);
                 for (com.averio.mdm.domain.entity.Party p : neo4jMatches) {
                     if (currentGoldenId.equals(p.getGoldenRecordId())) {
                         p.setGoldenRecordId(newGoldenId);
@@ -887,7 +1038,6 @@ public class StewardController {
                     }
                 }
                 if (found && goldenRecordService != null) {
-                    // Refresh the original cluster survivorship without this source
                     goldenRecordService.refreshGoldenRecord(currentGoldenId, user);
                 }
             } catch (Exception e) {
@@ -895,29 +1045,32 @@ public class StewardController {
             }
         }
 
-        response.put("status",          found ? "UNLINKED" : "NOT_FOUND");
-        response.put("sourceSystemId",  sourceSystemId);
-        response.put("oldGoldenId",     currentGoldenId);
-        response.put("newGoldenId",     found ? newGoldenId : null);
-        response.put("reason",          reason);
-        response.put("performedBy",     user);
+        response.put("status",         found ? "UNLINKED" : "NOT_FOUND");
+        response.put("sourceSystemId", sourceSystemId);
+        response.put("sourceSystem",   sourceSystem != null ? sourceSystem : "");
+        response.put("oldGoldenId",    currentGoldenId);
+        response.put("newGoldenId",    found ? newGoldenId : null);
+        response.put("reason",         reason);
+        response.put("performedBy",    user);
         response.put("message", found
-            ? "Source " + sourceSystemId + " unlinked from golden " + currentGoldenId
-              + " and assigned new golden ID " + newGoldenId
+            ? "Source " + sourceSystemId + " (" + (sourceSystem != null ? sourceSystem : "any system") + ")"
+              + " unlinked from golden " + currentGoldenId + " → new golden ID " + newGoldenId
             : "Source " + sourceSystemId + " not found under golden ID " + currentGoldenId);
         return ResponseEntity.ok(response);
     }
 
     /**
-     * POST /api/v1/steward/relink-source?sourceSystemId=02112411&fromGoldenId=0023626574&toGoldenId=0009876543
+     * POST /api/v1/steward/relink-source?sourceSystemId=02112411&sourceSystem=Trust&fromGoldenId=0023626574&toGoldenId=0009876543
      *
      * RELINK: Moves one source record from its current golden cluster to a different existing golden ID.
-     * Both clusters get their survivorship refreshed.
+     * sourceSystem is optional but recommended — disambiguates when the same sourceSystemId
+     * exists in multiple source systems. Both clusters get their survivorship refreshed.
      */
     @PostMapping("/relink-source")
     @Operation(summary = "Move a source record from one golden cluster to another")
     public ResponseEntity<Map<String, Object>> relinkSource(
             @RequestParam String sourceSystemId,
+            @RequestParam(required = false) String sourceSystem,
             @RequestParam String fromGoldenId,
             @RequestParam String toGoldenId,
             @RequestParam(defaultValue = "RELINK") String reason,
@@ -933,9 +1086,11 @@ public class StewardController {
                 List<com.averio.mdm.domain.cosmos.PartyDoc> matches =
                         partyDocRepository.findBySourceSystemId(sourceSystemId);
                 for (com.averio.mdm.domain.cosmos.PartyDoc doc : matches) {
+                    if (sourceSystem != null && !sourceSystem.isBlank()
+                            && !sourceSystem.equalsIgnoreCase(doc.getSourceSystem())) continue;
                     if (fromGoldenId.equals(doc.getGoldenRecordId())) {
-                        log.info("relinkSource: Cosmos {} from golden {} → golden {}",
-                                sourceSystemId, fromGoldenId, toGoldenId);
+                        log.info("relinkSource: Cosmos {} ({}) from golden {} → golden {}",
+                                sourceSystemId, doc.getSourceSystem(), fromGoldenId, toGoldenId);
                         doc.setGoldenRecordId(toGoldenId);
                         doc.setStatus("ACTIVE");
                         doc.setUpdatedAt(java.time.LocalDateTime.now());
@@ -953,7 +1108,9 @@ public class StewardController {
         if (partyRepository != null) {
             try {
                 List<com.averio.mdm.domain.entity.Party> neo4jMatches =
-                        partyRepository.findBySourceSystemIdOnly(sourceSystemId);
+                        (sourceSystem != null && !sourceSystem.isBlank())
+                            ? partyRepository.findBySourceSystemAndSourceSystemId(sourceSystem, sourceSystemId)
+                            : partyRepository.findBySourceSystemIdOnly(sourceSystemId);
                 for (com.averio.mdm.domain.entity.Party p : neo4jMatches) {
                     if (fromGoldenId.equals(p.getGoldenRecordId())) {
                         p.setGoldenRecordId(toGoldenId);
@@ -975,12 +1132,14 @@ public class StewardController {
 
         response.put("status",         found ? "RELINKED" : "NOT_FOUND");
         response.put("sourceSystemId", sourceSystemId);
+        response.put("sourceSystem",   sourceSystem != null ? sourceSystem : "");
         response.put("fromGoldenId",   fromGoldenId);
         response.put("toGoldenId",     toGoldenId);
         response.put("reason",         reason);
         response.put("performedBy",    user);
         response.put("message", found
-            ? "Source " + sourceSystemId + " moved from golden " + fromGoldenId + " to " + toGoldenId
+            ? "Source " + sourceSystemId + " (" + (sourceSystem != null ? sourceSystem : "any system") + ")"
+              + " moved from golden " + fromGoldenId + " to " + toGoldenId
             : "Source " + sourceSystemId + " not found under golden ID " + fromGoldenId);
         return ResponseEntity.ok(response);
     }

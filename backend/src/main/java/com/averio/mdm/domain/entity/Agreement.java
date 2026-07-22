@@ -42,10 +42,13 @@ public class Agreement {
     @Property("createdBy") private String createdBy;
     @Property("updatedBy") private String updatedBy;
     @Property("version") private Long version;
+    @Builder.Default
     @Relationship(type = "AGREEMENT_PARTY", direction = Relationship.Direction.OUTGOING)
     private List<Party> parties = new ArrayList<>();
+    @Builder.Default
     @Relationship(type = "COVERS_PRODUCT", direction = Relationship.Direction.OUTGOING)
     private List<Product> coveredProducts = new ArrayList<>();
+    @Builder.Default
     @Relationship(type = "LINKED_ACCOUNT", direction = Relationship.Direction.OUTGOING)
     private List<Account> linkedAccounts = new ArrayList<>();
 }

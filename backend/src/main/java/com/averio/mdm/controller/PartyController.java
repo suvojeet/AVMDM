@@ -334,12 +334,13 @@ public class PartyController {
                                     ? (p.getFirstName() + (p.getLastName() != null ? " " + p.getLastName() : "")).trim()
                                     : "");
                     Map<String, Object> entry = new java.util.LinkedHashMap<>();
-                    entry.put("globalId",    p.getGlobalId());
-                    entry.put("displayName", !name.isBlank() ? name : p.getOrganizationName());
-                    entry.put("partyType",   p.getPartyType());
-                    entry.put("taxId",       p.getTaxId());
-                    entry.put("status",      p.getStatus());
-                    entry.put("sourceSystem", p.getSourceSystem());
+                    entry.put("globalId",      p.getGlobalId());
+                    entry.put("goldenRecordId", p.getGoldenRecordId());
+                    entry.put("displayName",   !name.isBlank() ? name : p.getOrganizationName());
+                    entry.put("partyType",     p.getPartyType());
+                    entry.put("taxId",         p.getTaxId());
+                    entry.put("status",        p.getStatus());
+                    entry.put("sourceSystem",  p.getSourceSystem());
                     suggestions.add(entry);
                 }
                 return ResponseEntity.ok(suggestions);
@@ -357,12 +358,13 @@ public class PartyController {
             boolean taxMatch = taxId.toLowerCase().contains(lower);
             if (nameMatch || taxMatch) {
                 Map<String, Object> entry = new java.util.LinkedHashMap<>();
-                entry.put("globalId", doc.getGlobalId());
-                entry.put("displayName", name.isBlank() ? doc.getOrganizationName() : name);
-                entry.put("partyType", doc.getPartyType());
-                entry.put("taxId", taxId.isBlank() ? null : taxId);
-                entry.put("status", doc.getStatus());
-                entry.put("sourceSystem", doc.getSourceSystem());
+                entry.put("globalId",      doc.getGlobalId());
+                entry.put("goldenRecordId", doc.getGoldenRecordId());
+                entry.put("displayName",   name.isBlank() ? doc.getOrganizationName() : name);
+                entry.put("partyType",     doc.getPartyType());
+                entry.put("taxId",         taxId.isBlank() ? null : taxId);
+                entry.put("status",        doc.getStatus());
+                entry.put("sourceSystem",  doc.getSourceSystem());
                 // primary address snippet (first entry if present)
                 if (doc.getAddresses() != null && !doc.getAddresses().isEmpty()) {
                     Map<String, Object> addr = doc.getAddresses().get(0);

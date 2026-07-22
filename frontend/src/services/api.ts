@@ -63,6 +63,7 @@ export const partyApi = {
 
 export interface PartySuggestion {
   globalId: string;
+  goldenRecordId?: string;
   displayName: string;
   partyType: string;
   taxId?: string;
@@ -134,10 +135,10 @@ export const stewardApi = {
     api.get(`/steward/golden-cluster`, { params: { goldenRecordId } }).then((r) => r.data),
   splitGolden: (goldenRecordId: string, reason: string) =>
     api.post(`/steward/split-golden`, null, { params: { goldenRecordId, reason } }).then((r) => r.data),
-  unlinkSource: (sourceSystemId: string, currentGoldenId: string, reason: string) =>
-    api.post(`/steward/unlink-source`, null, { params: { sourceSystemId, currentGoldenId, reason } }).then((r) => r.data),
-  relinkSource: (sourceSystemId: string, fromGoldenId: string, toGoldenId: string, reason: string) =>
-    api.post(`/steward/relink-source`, null, { params: { sourceSystemId, fromGoldenId, toGoldenId, reason } }).then((r) => r.data),
+  unlinkSource: (sourceSystemId: string, currentGoldenId: string, reason: string, sourceSystem?: string) =>
+    api.post(`/steward/unlink-source`, null, { params: { sourceSystemId, sourceSystem: sourceSystem || undefined, currentGoldenId, reason } }).then((r) => r.data),
+  relinkSource: (sourceSystemId: string, fromGoldenId: string, toGoldenId: string, reason: string, sourceSystem?: string) =>
+    api.post(`/steward/relink-source`, null, { params: { sourceSystemId, sourceSystem: sourceSystem || undefined, fromGoldenId, toGoldenId, reason } }).then((r) => r.data),
   getMatchDetail: (taskId: string) => api.get(`/steward/tasks/${taskId}/match-detail`).then((r) => r.data),
 };
 

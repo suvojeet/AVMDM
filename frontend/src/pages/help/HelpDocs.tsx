@@ -1,13 +1,14 @@
 import { Link } from "react-router-dom";
 import {
   HelpCircle, BookOpen, Star, Clock, GitMerge, FlaskConical,
-  ChevronRight, ExternalLink, Lightbulb, Zap, Shield, Brain, Webhook,
+  ChevronRight, ExternalLink, Lightbulb, Zap, Shield, Brain, Webhook, ScrollText,
 } from "lucide-react";
+import { useAuthStore } from "../../store/authStore";
 
 // ── Doc card ──────────────────────────────────────────────────────────────────
 
 function DocCard({
-  to, icon: Icon, title, description, badge, color,
+  to, icon: Icon, title, description, badge, color, badgeColor,
 }: {
   to: string;
   icon: React.ElementType;
@@ -15,6 +16,7 @@ function DocCard({
   description: string;
   badge: string;
   color: string;
+  badgeColor?: string;
 }) {
   return (
     <Link
@@ -26,8 +28,9 @@ function DocCard({
         <div className={`w-9 h-9 rounded-lg flex items-center justify-center ${color}`}>
           <Icon size={18} />
         </div>
-        <span className="text-[9px] font-bold px-2 py-0.5 rounded-full
-                         bg-aq-blue/15 text-aq-blue-2 border border-aq-blue/25 leading-none self-start mt-1">
+        <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full border leading-none self-start mt-1 ${
+          badgeColor ?? "bg-aq-blue/15 text-aq-blue-2 border-aq-blue/25"
+        }`}>
           {badge}
         </span>
       </div>
@@ -67,6 +70,9 @@ function QuickLink({ to, icon: Icon, label }: {
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function HelpDocs() {
+  const { user } = useAuthStore();
+  const isAverioAdmin = user?.role === "ADMIN" || user?.role === "PLATFORM_ADMIN";
+
   return (
     <div className="flex flex-col h-full min-h-0 overflow-y-auto p-6 gap-6">
 
@@ -139,6 +145,17 @@ export default function HelpDocs() {
             badge="Ext"
             color="bg-cyan-500/15 text-cyan-400 border border-cyan-500/20"
           />
+          {isAverioAdmin && (
+            <DocCard
+              to="/docs/logging"
+              icon={ScrollText}
+              title="Logging Configuration"
+              description="Log profiles, level reference, the LOG_LEVEL_APP override, and how to enable diagnostic detail in a client production environment without redeployment."
+              badge="Internal"
+              color="bg-purple-500/15 text-purple-400 border border-purple-500/20"
+              badgeColor="bg-purple-500/15 text-purple-300 border-purple-500/30"
+            />
+          )}
         </div>
       </div>
 
@@ -156,6 +173,9 @@ export default function HelpDocs() {
             <QuickLink to="/studio"         icon={Lightbulb}    label="Studio Guide — interactive tour" />
             <QuickLink to="/test-lab"       icon={FlaskConical} label="Test Laboratory — run tests" />
             <QuickLink to="/docs/extensions" icon={Webhook}     label="Extension Framework — developer reference" />
+            {isAverioAdmin && (
+              <QuickLink to="/docs/logging" icon={ScrollText} label="Logging Configuration — Averio internal" />
+            )}
           </div>
         </div>
 

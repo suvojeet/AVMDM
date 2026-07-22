@@ -4,7 +4,7 @@ import {
   Database, ChevronLeft, ChevronRight, Settings, HelpCircle,
   Search, Sparkles, LogOut, Building2, Package, FileText,
   Lock, Network, Brain, ChevronDown, Clock, Star, ScrollText,
-  Edit2, BarChart2, FlaskConical, Layers, Zap,
+  Edit2, BarChart2, FlaskConical, Layers, Zap, FileDown, ExternalLink,
 } from "lucide-react";
 import clsx from "clsx";
 import { useState } from "react";
@@ -65,6 +65,7 @@ const mainNav: NavEntry[] = [
       { to: "/relationships/graph",  icon: BarChart2, label: "Search & Graph"       },
     ],
   },
+  { kind: "item", to: "/knowledge-graph", icon: Network, label: "Knowledge Graph" },
   { kind: "item", to: "/governance", icon: Shield, label: "Governance" },
   {
     kind: "group",
@@ -442,7 +443,43 @@ export default function Sidebar() {
             collapsed={collapsed}
           />
         )}
+        {user?.role === "ADMIN" && (
+          <NavItem
+            to="/reports"
+            icon={FileDown}
+            label="Report Center"
+            collapsed={collapsed}
+          />
+        )}
         {secondaryNav.map(renderEntry)}
+
+        {/* ── Averio Control Plane — PLATFORM_ADMIN only ── */}
+        {user?.role === "PLATFORM_ADMIN" && (
+          <>
+            <div className={clsx("my-2", !collapsed && "px-3")}>
+              <div className="h-px bg-aq-border" />
+            </div>
+            <NavLink
+              to="/platform"
+              className={({ isActive }) => clsx(
+                "flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 group relative",
+                isActive
+                  ? "bg-amber-500/15 text-amber-400 border border-amber-500/30"
+                  : "text-amber-500/70 hover:bg-amber-500/10 hover:text-amber-400"
+              )}
+            >
+              <ExternalLink size={16} className="flex-shrink-0" />
+              {!collapsed && <span className="flex-1 truncate">Control Plane</span>}
+              {collapsed && (
+                <div className="absolute left-full ml-3 px-2.5 py-1.5 bg-aq-card border border-amber-500/30
+                                text-amber-400 text-xs rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100
+                                pointer-events-none z-50 transition-opacity shadow-lg shadow-black/40">
+                  Control Plane
+                </div>
+              )}
+            </NavLink>
+          </>
+        )}
       </nav>
 
       {/* User + Collapse toggle */}

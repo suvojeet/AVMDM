@@ -42,6 +42,7 @@ public class Product {
     @Property("updatedBy") private String updatedBy;
     @Property("version") private Long version;
     @Property("dataQualityScore") private Double dataQualityScore;
+    @Builder.Default
     @Relationship(type = "BUNDLED_WITH", direction = Relationship.Direction.OUTGOING)
     private List<Product> bundledProducts = new ArrayList<>();
 }

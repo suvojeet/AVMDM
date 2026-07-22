@@ -202,18 +202,23 @@ public class Party {
     private Double accuracyScore;
 
     // ---- Relationships ----
+    @Builder.Default
     @Relationship(type = "HAS_ADDRESS", direction = Relationship.Direction.OUTGOING)
     private List<Address> addresses = new ArrayList<>();
 
+    @Builder.Default
     @Relationship(type = "HAS_PHONE", direction = Relationship.Direction.OUTGOING)
     private List<Phone> phoneNumbers = new ArrayList<>();
 
+    @Builder.Default
     @Relationship(type = "HAS_EMAIL", direction = Relationship.Direction.OUTGOING)
     private List<EmailAddress> emailAddresses = new ArrayList<>();
 
+    @Builder.Default
     @Relationship(type = "RELATED_TO", direction = Relationship.Direction.OUTGOING)
     private List<PartyRelationship> relationships = new ArrayList<>();
 
+    @Builder.Default
     @Relationship(type = "HAS_ACCOUNT", direction = Relationship.Direction.OUTGOING)
     private List<Account> accounts = new ArrayList<>();
 

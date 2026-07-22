@@ -124,12 +124,12 @@ def add_cover(doc: Document):
     cell.width = Inches(6)
 
     lines = [
-        ("UNITED STATES PATENT APPLICATION", 18, True),
-        ("Non-Provisional Utility Patent — 35 U.S.C. § 111(a)", 11, False),
+        ("UNITED STATES PROVISIONAL PATENT APPLICATION", 18, True),
+        ("Provisional Application for Patent - 35 U.S.C. ss 111(b)", 11, False),
         ("", 6, False),
-        ("Applicant: Averio Technologies Inc.", 11, False),
-        ("Inventors: Suvojeet Pal; Rakhi Chatterjee", 11, False),
-        ("Attorney Docket No.: AVERIO-001-US", 11, False),
+        ("Applicant: Suvojeet Pal (Individual)", 11, False),
+        ("Inventor: Suvojeet Pal", 11, False),
+        ("Docket Reference: AVERIO-001-US-PROV", 11, False),
     ]
     for text, size, bold in lines:
         p = cell.add_paragraph(text)
@@ -297,7 +297,7 @@ def render_markdown(doc: Document, md_text: str):
         if stripped.startswith("# ") and not stripped.startswith("## "):
             text = stripped[2:].strip()
             # Skip the very first H1 (already in cover banner)
-            if text == "UNITED STATES PATENT APPLICATION":
+            if text == "UNITED STATES PROVISIONAL PATENT APPLICATION":
                 i += 1
                 continue
             doc.add_heading(text, level=1)

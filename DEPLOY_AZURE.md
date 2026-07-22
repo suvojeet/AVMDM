@@ -67,7 +67,7 @@ Portal → **averio-data-studio** → Configuration → Add:
 
 | Name | Value |
 |---|---|
-| VITE_API_BASE_URL | https://averio-mdm-prod-api.azurewebsites.net |
+| VITE_API_BASE_URL | https://averio-mdm-prod-api-d6a4fxbdh8b9hnd2.canadacentral-01.azurewebsites.net |
 
 ---
 
@@ -118,9 +118,9 @@ https://github.com/suvojeet/AVMDM/actions
 
 | Check | URL |
 |---|---|
-| Frontend | https://averio-data-studio.azurestaticapps.net |
-| Backend health | https://averio-mdm-prod-api.azurewebsites.net/actuator/health |
-| Swagger UI | https://averio-mdm-prod-api.azurewebsites.net/swagger-ui.html |
+| Frontend | https://mango-hill-0f79a0d0f.7.azurestaticapps.net |
+| Backend health | https://averio-mdm-prod-api-d6a4fxbdh8b9hnd2.canadacentral-01.azurewebsites.net/actuator/health |
+| Swagger UI | https://averio-mdm-prod-api-d6a4fxbdh8b9hnd2.canadacentral-01.azurewebsites.net/swagger-ui.html |
 | Neo4j Browser | https://console.neo4j.io |
 
 ---

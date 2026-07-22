@@ -4,21 +4,21 @@
 
 spring:
 
-  # Redis — Azure Cache for Redis uses port 6380 with SSL/TLS
-  data:
-    redis:
-      host: ${REDIS_HOST:averiomdmcache.redis.cache.windows.net}
-      port: ${REDIS_PORT:6380}
-      password: ${REDIS_PASSWORD}
-      ssl:
-        enabled: true
-      timeout: 5000ms
-      lettuce:
-        pool:
-          max-active: 20
-          max-idle: 10
-          min-idle: 2
-          time-between-eviction-runs: 60s
+  # ── Temporarily disabled on the B1 plan ───────────────────────────────────────
+  # Redis: Azure Cache for Redis has publicNetworkAccess=Disabled and B1 App
+  # Service plans cannot do VNet integration, so the cache is unreachable.
+  # CacheConfig falls back to an in-memory ConcurrentMapCacheManager.
+  # Elasticsearch: the starter is on the classpath but unused by application code;
+  # without exclusion it auto-configures against localhost:9200 and fails.
+  # Re-enable Redis by removing RedisAutoConfiguration below once the app is on a
+  # plan with VNet integration (S1+) or the cache allows public access.
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.data.redis.RedisAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.redis.RedisRepositoriesAutoConfiguration
+      - org.springframework.boot.autoconfigure.elasticsearch.ElasticsearchRestClientAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchDataAutoConfiguration
+      - org.springframework.boot.autoconfigure.data.elasticsearch.ElasticsearchRepositoriesAutoConfiguration
 
   # Azure AD JWT authentication (required in production)
   security:
@@ -45,8 +45,11 @@ management:
       enabled: true
     neo4j:
       enabled: true
+    # Disabled alongside the autoconfigure excludes above — re-enable with Redis.
     redis:
-      enabled: true
+      enabled: false
+    elasticsearch:
+      enabled: false
 
 # CORS — override with your Azure Static Web App URL(s)
 averio:

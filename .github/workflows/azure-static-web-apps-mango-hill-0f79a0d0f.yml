@@ -45,7 +45,7 @@ jobs:
           npm ci
           npm run build
         env:
-          VITE_API_BASE_URL: https://averio-mdm-prod-api.azurewebsites.net
+          VITE_API_BASE_URL: https://averio-mdm-prod-api-d6a4fxbdh8b9hnd2.canadacentral-01.azurewebsites.net
 
       - name: Build And Deploy
         id: builddeploy
@@ -58,7 +58,7 @@ jobs:
           output_location: "dist"
           github_id_token: ${{ steps.idtoken.outputs.result }}
         env:
-          VITE_API_BASE_URL: https://averio-mdm-prod-api.azurewebsites.net
+          VITE_API_BASE_URL: https://averio-mdm-prod-api-d6a4fxbdh8b9hnd2.canadacentral-01.azurewebsites.net
 
   close_pull_request_job:
     if: github.event_name == 'pull_request' && github.event.action == 'closed'

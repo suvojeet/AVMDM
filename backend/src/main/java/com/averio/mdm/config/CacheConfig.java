@@ -1,6 +1,7 @@
 package com.averio.mdm.config;
 
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.cache.CacheManager;
 import org.springframework.cache.annotation.EnableCaching;
 import org.springframework.cache.concurrent.ConcurrentMapCacheManager;
@@ -20,9 +21,26 @@ import java.util.Map;
 @EnableCaching
 public class CacheConfig {
 
+    /** Cache names used by @Cacheable/@CacheEvict across the application. */
+    private static final String[] CACHE_NAMES = {
+            "parties", "goldenRecords", "survivorshipRules", "matchingRules",
+            "governance", "referenceData", "referenceDataActive", "license",
+            "dynamicSchemas"
+    };
+
+    /**
+     * Redis-backed when a connection factory is present and reachable; otherwise an
+     * in-memory cache. Redis is optional so the app can run without it (e.g. B1 plans
+     * with no VNet integration, where Azure Cache for Redis is unreachable).
+     */
     @Bean
     @Primary
-    public CacheManager cacheManager(RedisConnectionFactory connectionFactory) {
+    public CacheManager cacheManager(ObjectProvider<RedisConnectionFactory> connectionFactoryProvider) {
+        RedisConnectionFactory connectionFactory = connectionFactoryProvider.getIfAvailable();
+        if (connectionFactory == null) {
+            log.info("Redis not configured — using in-memory cache");
+            return new ConcurrentMapCacheManager(CACHE_NAMES);
+        }
         try {
             // Test the connection before building the Redis cache manager
             connectionFactory.getConnection().ping();
@@ -51,10 +69,7 @@ public class CacheConfig {
 
         } catch (Exception e) {
             log.warn("Redis unavailable ({}), falling back to in-memory cache", e.getMessage());
-            return new ConcurrentMapCacheManager(
-                    "parties", "goldenRecords", "survivorshipRules", "matchingRules",
-                    "governance", "referenceData", "referenceDataActive", "license",
-                    "dynamicSchemas");
+            return new ConcurrentMapCacheManager(CACHE_NAMES);
         }
     }
 }

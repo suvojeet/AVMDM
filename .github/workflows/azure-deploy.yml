@@ -76,9 +76,7 @@ jobs:
 
       - name: Build (Azure config)
         working-directory: frontend
-        run: |
-          cp .env.azure .env.production
-          npm run build
+        run: npm run build
         env:
           VITE_API_BASE_URL: https://averio-mdm-prod-api.azurewebsites.net
 

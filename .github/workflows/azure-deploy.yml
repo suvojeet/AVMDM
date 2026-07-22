@@ -6,19 +6,14 @@ on:
   workflow_dispatch:
 
 env:
-  ACR_NAME: averiomdmprodacr
   BACKEND_APP: averio-mdm-prod-api
-  FRONTEND_APP: averio-data-studio
   RESOURCE_GROUP: averio-mdmrg
-  IMAGE_NAME: averio-mdm-backend
 
 jobs:
-  # ── 1. Build & push backend Docker image ──────────────────────────────────
-  build-backend:
-    name: Build Backend
+  # ── Build JAR and deploy directly to App Service built-in Java runtime ──────
+  deploy-backend:
+    name: Deploy Backend
     runs-on: ubuntu-latest
-    outputs:
-      image-tag: ${{ steps.meta.outputs.tag }}
 
     steps:
       - name: Checkout
@@ -40,62 +35,29 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Log in to ACR
-        run: az acr login --name ${{ env.ACR_NAME }}
-
-      - name: Build & push Docker image
-        id: meta
-        working-directory: backend
+      - name: Configure App Service for built-in Java 21 runtime
         run: |
-          TAG=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:${{ github.sha }}
-          LATEST=${{ env.ACR_NAME }}.azurecr.io/${{ env.IMAGE_NAME }}:latest
-          docker build -f ../infrastructure/docker/Dockerfile.backend -t $TAG -t $LATEST .
-          docker push $TAG
-          docker push $LATEST
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
-
-  # ── 2. Deploy backend image to App Service ────────────────────────────────
-  # Note: Frontend is deployed by Azure's auto-generated workflow:
-  # azure-static-web-apps-mango-hill-0f79a0d0f.yml
-  deploy-backend:
-    name: Deploy Backend
-    runs-on: ubuntu-latest
-    needs: build-backend
-
-    steps:
-      - name: Log in to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-
-      - name: Set startup time limit
-        run: |
-          az webapp config appsettings set \
+          az webapp config set \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --name ${{ env.BACKEND_APP }} \
-            --settings WEBSITES_CONTAINER_START_TIME_LIMIT=600
+            --java-version "21" \
+            --java-container "JAVA" \
+            --java-container-version "SE"
 
-      - name: Deploy container to App Service
+      - name: Deploy JAR to App Service
         run: |
-          az webapp config container set \
+          JAR=$(ls backend/target/averio-mdm-*.jar | head -1)
+          az webapp deploy \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --name ${{ env.BACKEND_APP }} \
-            --container-image-name ${{ needs.build-backend.outputs.image-tag }} \
-            --container-registry-url https://${{ env.ACR_NAME }}.azurecr.io \
-            --container-registry-user ${{ env.ACR_NAME }} \
-            --container-registry-password "$(az acr credential show --name ${{ env.ACR_NAME }} --query passwords[0].value -o tsv)"
-
-      - name: Restart App Service
-        run: |
-          az webapp restart \
-            --resource-group ${{ env.RESOURCE_GROUP }} \
-            --name ${{ env.BACKEND_APP }}
+            --src-path "$JAR" \
+            --type jar
 
       - name: Wait for health check
         run: |
-          echo "Waiting 180s for app to start..."
-          sleep 180
-          for i in 1 2 3; do
+          echo "Waiting 120s for Spring Boot to start..."
+          sleep 120
+          for i in 1 2 3 4 5; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               https://averio-mdm-prod-api.azurewebsites.net/actuator/health 2>/dev/null || echo "000")
             echo "Attempt $i — Health status: $STATUS"
@@ -105,5 +67,5 @@ jobs:
             fi
             sleep 30
           done
-          echo "Warning: health check did not return 200 — check App Service logs in Azure portal"
+          echo "Warning: health check did not return 200 — check App Service logs"
           exit 0

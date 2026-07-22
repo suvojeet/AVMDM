@@ -73,7 +73,10 @@ jobs:
           az webapp config container set \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --name ${{ env.BACKEND_APP }} \
-            --container-image-name ${{ needs.build-backend.outputs.image-tag }}
+            --container-image-name ${{ needs.build-backend.outputs.image-tag }} \
+            --container-registry-url https://${{ env.ACR_NAME }}.azurecr.io \
+            --container-registry-user ${{ env.ACR_NAME }} \
+            --container-registry-password "$(az acr credential show --name ${{ env.ACR_NAME }} --query passwords[0].value -o tsv)"
 
       - name: Restart App Service
         run: |

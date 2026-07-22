@@ -68,6 +68,13 @@ jobs:
         with:
           creds: ${{ secrets.AZURE_CREDENTIALS }}
 
+      - name: Set startup time limit
+        run: |
+          az webapp config appsettings set \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --name ${{ env.BACKEND_APP }} \
+            --settings WEBSITES_CONTAINER_START_TIME_LIMIT=600
+
       - name: Deploy container to App Service
         run: |
           az webapp config container set \
@@ -86,8 +93,8 @@ jobs:
 
       - name: Wait for health check
         run: |
-          echo "Waiting 90s for app to start..."
-          sleep 90
+          echo "Waiting 180s for app to start..."
+          sleep 180
           for i in 1 2 3; do
             STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
               https://averio-mdm-prod-api.azurewebsites.net/actuator/health 2>/dev/null || echo "000")

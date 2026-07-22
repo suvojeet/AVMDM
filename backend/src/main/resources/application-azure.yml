@@ -25,7 +25,7 @@ spring:
     oauth2:
       resourceserver:
         jwt:
-          jwk-set-uri: ${AZURE_AD_JWK_URI}
+          jwk-set-uri: ${AZURE_AD_JWK_URI:}
 
 # Actuator — expose health probes for Azure App Service
 management:

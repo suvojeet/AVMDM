@@ -48,11 +48,16 @@ jobs:
       - name: Deploy JAR to App Service
         run: |
           JAR=$(ls backend/target/averio-mdm-*.jar | head -1)
+          # --timeout is in MILLISECONDS. It must exceed the app's cold start,
+          # otherwise the CLI reports failure while the site is still starting
+          # normally and the JAR has already uploaded. The "Wait for health
+          # check" step below is what actually decides whether the deploy worked.
           az webapp deploy \
             --resource-group ${{ env.RESOURCE_GROUP }} \
             --name ${{ env.BACKEND_APP }} \
             --src-path "$JAR" \
-            --type jar
+            --type jar \
+            --timeout 1800000
 
       - name: Wait for health check
         run: |

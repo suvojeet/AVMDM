@@ -43,8 +43,9 @@ public interface PartyRepository extends Neo4jRepository<Party, Long> {
     List<Party> fullTextSearch(@Param("searchTerm") String searchTerm, @Param("limit") int limit);
 
     @Query("""
-        MATCH (p:Party)-[r]-(related)
+        MATCH (p:Party)
         WHERE p.globalId = $globalId
+        OPTIONAL MATCH (p)-[r]-(related)
         RETURN p, collect(r), collect(related)
         """)
     Optional<Party> findByGlobalIdWithRelationships(@Param("globalId") String globalId);
